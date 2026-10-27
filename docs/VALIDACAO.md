@@ -354,3 +354,16 @@ participante. O teste inicial com três navegadores anônimos passou: instalaç�
 pública real, zero POSTs de login, início, retorno após recarregar e rotas privadas
 recusando GET (401) e PUT (403). A checagem de cinco controles também passou com
 anfitrião anônimo. A senha administrativa atual permanece privada e inalterada.
+
+### Publicação do acesso sem senha
+
+Deploy `dpl_AabnP6ApEVyPvLANx3E2xCpXYQUz`, READY, em
+https://bomberman-online.vercel.app . Dois testes no domínio público passaram em
+30,9 s: três visitantes anônimos criaram, instalaram, iniciaram e retomaram uma
+partida (20,2 s), e outro visitante jogou sozinho e recarregou reutilizando a
+instalação (9,6 s). Nenhum POST de login foi usado. Todos continuaram com
+`owner: false`; a biblioteca privada recusou GET com 401 e PUT com 403.
+
+A validação local final passou cinco casos, incluindo os cinco controles com
+anfitrião anônimo, navegação móvel e distinção entre criar sala e abrir a
+administração. A senha atual permanece privada. Jogar não depende dessa senha.
