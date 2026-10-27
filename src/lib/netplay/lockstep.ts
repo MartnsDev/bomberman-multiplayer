@@ -1,6 +1,7 @@
 import {
   frameInputSchema,
   MAX_FRAME_AHEAD,
+  MAX_BUFFERED_COMMITS,
   type FrameCommit,
   type FrameInput,
 } from "./protocol";
@@ -129,7 +130,7 @@ export class LockstepReplica {
       commit.epoch !== this.epoch ||
       !Number.isInteger(commit.frame) ||
       commit.frame < this.nextFrame ||
-      commit.frame > this.nextFrame + MAX_FRAME_AHEAD ||
+      commit.frame > this.nextFrame + MAX_BUFFERED_COMMITS ||
       commit.masks.length !== 5 ||
       commit.masks.some((m) => !Number.isInteger(m) || m < 0 || m > 4095)
     )

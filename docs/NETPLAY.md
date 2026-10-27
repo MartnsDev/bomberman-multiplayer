@@ -59,21 +59,21 @@ com os comandos das posições ativas. Um controle sem comandos no prazo é desa
 repetidas, conflitantes, fora de ordem e muito adiantadas são tratadas sem
 inventar comandos. A réplica avança somente confirmações contíguas.
 
-O protocolo 3 usa atraso automático por padrão: começa em seis quadros e ajusta o buffer até 24 quadros conforme o RTT e as perdas de prazo dos comandos. O aumento é agendado em um quadro futuro comum; cada jogador preenche apenas suas próprias entradas reais, sem sobrescrever quadros já enviados ou prever comandos remotos. Após dez segundos de latência menor, o buffer é reduzido preservando os comandos já enfileirados. O modo manual oferece de 2 a 24 quadros. Não há rollback. O protocolo procura a taxa
-nativa próxima de 60 Hz; uma máquina ou conexão que não acompanhe pode ter seu controle temporariamente inativo. Não existe promessa de latência zero ou de 60 FPS em qualquer
-hardware.
+O protocolo 4 usa atraso automático por padrão: começa em seis quadros e ajusta o buffer até 24 conforme o RTT dos participantes ativos que continuam enviando comandos. A ausência de entrada de um participante deixa seu controle neutro, sem aumentar o atraso da sala. Sondas de RTT são suspensas durante a restauração individual e retomadas após o ACK, para não tratar o carregamento do convidado como latência de rede. O aumento é agendado em um quadro futuro comum; cada jogador preenche apenas suas próprias entradas reais, sem sobrescrever quadros já enviados ou prever comandos remotos. Após dez segundos de latência menor, o buffer é reduzido preservando os comandos já enfileirados. O modo manual oferece de 2 a 24 quadros.
+
+O convidado envia entradas seguindo cada commit recebido do coordenador, independentemente do atraso da renderização local. Pulsos de botões de ação entre dois quadros são guardados até a próxima entrada; direções refletem o estado atual. Uma mudança de atraso ainda pendente é reenviada ao participante que retorna antes dos commits de recuperação. Entradas são limitadas a 256 quadros futuros; a réplica pode armazenar até 1.024 commits para alcançar a partida após carregar o estado, executando cada quadro contíguo uma vez. Não há rollback. Uma máquina ou conexão que não acompanhe pode ter seu controle temporariamente inativo. Não existe promessa de latência zero ou de 60 FPS em qualquer hardware.
 
 O host transfere um snapshot canônico em blocos de 16 KiB, com SHA-256 e ACK da
-restauração. Saves, restauração e reinício são sincronizados. A cada 120 quadros,
+restauração. O HELLO informa suporte à descompressão gzip; estados são comprimidos quando isso reduz seu tamanho e o destinatário oferece suporte. A alternativa sem compressão permanece disponível. O tamanho original é limitado a 2 MiB, a descompressão é limitada ao tamanho declarado e o SHA-256 é conferido sobre o estado original antes de carregá-lo. Saves, restauração e reinício são sincronizados. A cada 120 quadros,
 os participantes comparam SHA-256 dos estados SNES serializados, sem usar a
-imagem como prova. A conferência assíncrona não bloqueia uma partida saudável.
+imagem como prova. A conferência assíncrona não bloqueia uma partida saudável. Se um participante não responde, apenas ele recebe uma recuperação individual; erros de oferta/resposta RTC durante saída ou fechamento também ficam restritos àquela conexão.
 Divergências recuperáveis recebem novo snapshot e época; a terceira divergência
 pausa todos. A saída de um convidado não pausa os outros. Seu retorno recebe um snapshot individual verificado, seguido dos commits acumulados enquanto o estado era preparado. A réplica recupera o atraso com limite de CPU por ciclo. A perda do coordenador promove um participante preparado, sem alterar slots ou conceder acesso administrativo. WebSocket close, presença expirada ou votação majoritária dos demais participantes preparados podem disparar a troca. Uma breve renegociação reconecta os sobreviventes ao novo coordenador. O encerramento explícito pelo proprietário continua encerrando a sala. Uma posição temporariamente offline não é
 atribuída a outra pessoa.
 
 ## Validação reproduzível
 
-Arquivos de ROM e checkpoints são privados e não entram no deploy. Os
+A ROM e o checkpoint de teste estão neste repositório por autorização do proprietário e não entram no deploy da Vercel. O instalador público baixa a ROM diretamente do GitHub e verifica seu SHA-256. Os
 checkpoints da arena foram obtidos por comandos normais nos menus do jogo;
 nenhuma escrita em RAM ou modificação da ROM é usada pelos testes.
 
@@ -115,7 +115,7 @@ SNES pronta.
 
 ## Instalação no aparelho
 
-A tela inicial permite importar e verificar a ROM antes de entrar em uma sala. Ela fica no IndexedDB; o navegador recebe uma solicitação de armazenamento persistente quando suportado. O emulador e imagens públicas são pré-carregados pelo service worker com integridade SHA-256. O manifest permite adicionar o site à tela inicial. Uma recarga restaura o token da sala da sessionStorage e reaproveita a ROM já instalada; o token nunca substitui a autenticação do proprietário. A primeira instalação ainda exige o arquivo em cada aparelho. Limpar dados do navegador apaga a instalação. A partida online requer conexão.
+A tela inicial permite importar e verificar a ROM antes de entrar em uma sala. Ela fica no IndexedDB; o navegador recebe uma solicitação de armazenamento persistente quando suportado. O emulador e imagens públicas são pré-carregados pelo service worker com integridade SHA-256. O manifest permite adicionar o site à tela inicial. Uma recarga restaura o token da sala da sessionStorage e reaproveita a ROM já instalada; o token nunca substitui a autenticação do proprietário. A primeira instalação baixa a cópia pública pelo botão de instalação ou recebe um arquivo importado em cada aparelho. Limpar dados do navegador apaga a instalação. A partida online requer conexão.
 
 ## Foco e continuidade
 

@@ -104,4 +104,44 @@ describe("entrada sem espera pelo quadro de animação", () => {
     expect(h.send).toHaveBeenLastCalledWith([]);
     h.cleanup();
   });
+  it("mantém teclado e toque quando um controle Bluetooth desconecta", () => {
+    const h = setup();
+    h.key("keydown", "ArrowRight");
+    h.touch.add(8);
+    h.win.dispatchEvent(new Event("bomber-touch"));
+    h.setPads([
+      {
+        buttons: Array.from({ length: 16 }, (_, i) => ({ pressed: i === 0 })),
+        axes: [0, 0],
+      },
+    ]);
+    h.win.dispatchEvent(new Event("gamepadconnected"));
+    h.setPads([]);
+    h.win.dispatchEvent(new Event("gamepaddisconnected"));
+    expect(h.send).toHaveBeenLastCalledWith([7, 8]);
+    expect([...h.touch]).toEqual([8]);
+    h.cleanup();
+  });
+  it("não reativa um gamepad em segundo plano quando o toque é limpo", () => {
+    const h = setup();
+    h.setPads([
+      {
+        buttons: Array.from({ length: 16 }, (_, i) => ({ pressed: i === 1 })),
+        axes: [0, 0],
+      },
+    ]);
+    h.win.dispatchEvent(new Event("gamepadconnected"));
+    h.win.dispatchEvent(new Event("blur"));
+    h.win.dispatchEvent(new Event("bomber-touch"));
+    expect(h.send).toHaveBeenLastCalledWith([]);
+    h.cleanup();
+  });
+  it("volta a responder ao teclado após desfoque mesmo sem outro evento de focus", () => {
+    const h = setup();
+    h.key("keydown", "KeyX");
+    h.win.dispatchEvent(new Event("blur"));
+    h.key("keydown", "ArrowLeft");
+    expect(h.send).toHaveBeenLastCalledWith([6]);
+    h.cleanup();
+  });
 });

@@ -176,7 +176,12 @@ export default function TouchControls({
       onPointerMove={(event) => update(event, false)}
       onPointerUp={release}
       onPointerCancel={release}
-      onLostPointerCapture={release}
+      onLostPointerCapture={(event) => {
+        // A child's implicit capture can move to this root and bubble its loss.
+        // Keep the finger held while this root still owns that pointer.
+        if (!event.currentTarget.hasPointerCapture?.(event.pointerId))
+          release(event);
+      }}
       onContextMenu={(event) => event.preventDefault()}
     >
       <div className="touch-shoulders">

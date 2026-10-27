@@ -159,7 +159,11 @@ A ROM fica no IndexedDB, e o emulador e imagens públicas usam cache com verific
 - **A troca de coordenador preserva os números dos controles:** coordenar a rede não transforma o Controle 2 em Controle 1.
 - **Encerrar sala** é um comando intencional do proprietário e continua encerrando a sessão.
 
-Uma mudança de coordenador pode exigir uma breve reconexão. Rede, capacidade do aparelho e restrições de NAT influenciam a resposta. O projeto não promete latência zero ou 60 FPS em qualquer dispositivo. O atraso automático começa em seis quadros e pode crescer até 24 para acomodar a rede e comandos que chegam fora do prazo; depois de estabilidade, ele pode diminuir novamente.
+O protocolo 4 envia comandos seguindo os quadros confirmados pelo coordenador, mesmo quando o desenho local fica atrasado. Toques rápidos na bomba são preservados até a próxima entrada. Falhas de negociação e ausência de resposta na conferência de estado recuperam apenas o participante afetado. A saída de alguém não aumenta o atraso dos outros. Estados de retorno usam compressão gzip quando disponível, com alternativa sem compressão e a mesma verificação SHA-256.
+
+Depois desta atualização, recarregue todos os aparelhos e crie uma sala nova. A instalação do jogo e os saves locais são preservados.
+
+Uma mudança de coordenador pode exigir uma breve reconexão. Rede, capacidade do aparelho e restrições de NAT influenciam a resposta. O projeto não promete latência zero ou 60 FPS em qualquer dispositivo. O atraso automático começa em seis quadros e pode crescer até 24 conforme a latência dos participantes ativos; depois de estabilidade, ele pode diminuir novamente.
 
 ## Salvar e restaurar
 
@@ -261,7 +265,7 @@ npm run typecheck
 npm test
 ```
 
-A revisão de acesso público passou 50 testes unitários. Os três testes Redis são opt-in e precisam de credenciais de um banco de teste. Não configure as credenciais de produção em um arquivo versionado.
+A revisão dos controles e das desconexões passou 67 testes unitários. Os três testes Redis são opt-in e precisam de credenciais de um banco de teste. Não configure as credenciais de produção em um arquivo versionado.
 
 ### Emulação real e navegadores
 
@@ -278,10 +282,10 @@ Em outro terminal, com o servidor ainda aberto:
 ```sh
 TEST_ROM_PATH=roms/super-bomberman-5.sfc \
 PLAYWRIGHT_BASE_URL=http://localhost:3000 \
-npx playwright test tests/e2e/netplay.spec.ts tests/e2e/netplay-gameplay.spec.ts tests/e2e/netplay-departures.spec.ts
+npx playwright test tests/e2e/netplay.spec.ts tests/e2e/netplay-gameplay.spec.ts tests/e2e/netplay-departures.spec.ts tests/e2e/netplay-isolation.spec.ts
 ```
 
-O setup salva a senha local no arquivo usado pela automação. O teste `tests/e2e/public-play.spec.ts` verifica visitantes sem login, instalação direta, sala com três pessoas, retorno e modo solo, mantendo as rotas administrativas protegidas. Os demais testes executam o core real, conferem controles exclusivos, movimento, bombas, áudio, checksums, saída/reentrada, perda de foco e suspensão simulada do loop do coordenador. Os testes legados de Remote Play têm requisitos próprios e estão preservados como histórico.
+O setup salva a senha local no arquivo usado pela automação. O teste `tests/e2e/netplay-isolation.spec.ts` usa três visitantes anônimos e verifica toques entre quadros, continuidade de um dedo pressionado durante desconexão de gamepad, perda de captura em um elemento filho e saída durante uma negociação RTC pendente. O teste `tests/e2e/public-play.spec.ts` verifica visitantes sem login, instalação direta, sala com três pessoas, retorno e modo solo, mantendo as rotas administrativas protegidas. Os demais testes executam o core real, conferem controles exclusivos, movimento, bombas, áudio, checksums, saída/reentrada, perda de foco e suspensão simulada do loop do coordenador. Os testes legados de Remote Play têm requisitos próprios e estão preservados como histórico.
 
 Para ampliar o cenário de três jogadores com testes móveis e rede artificialmente atrasada, adicione `TEST_MOBILE_CONTROLS=1 TEST_MOBILE_NETWORK=1 TEST_NETPLAY_RESILIENCE=1` ao comando. Atraso e retransmissão são simulados na aplicação; os testes não medem perda real de UDP. A validação em celulares físicos e redes distintas deve complementar a automação.
 

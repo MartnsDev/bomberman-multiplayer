@@ -173,7 +173,7 @@ export default function NetplayRoom({
     const generation = crypto.randomUUID();
     const peers = new Map<
       string,
-      { peer: DataPeer; id: string; remoteGeneration: string }
+      { peer: DataPeer; id: string; remoteGeneration: string; slot: number }
     >();
     const remoteReady = new Map<string, string>();
     const earlyCandidates = new Map<string, Signal[]>();
@@ -210,6 +210,22 @@ export default function NetplayRoom({
       )
         send({ type: "signal", target, signal: value });
     };
+    const recoverPeer = (id: string, peer: DataPeer, message?: string) => {
+      const entry = peers.get(id);
+      if (stopped || entry?.peer !== peer) return;
+      peers.delete(id);
+      remoteReady.delete(id);
+      earlyCandidates.delete(entry.id);
+      game.disconnect(entry.slot);
+      peer.close();
+      if (!host && !reconnectTimer) {
+        if (started.current) send({ type: "elect-host", hostId: room.hostId });
+        reconnectTimer = setTimeout(() => {
+          if (!stopped) setReconnection((n) => n + 1);
+        }, 1500);
+      }
+      if (message?.includes("incompatível")) setError(message);
+    };
     const make = (
       id: string,
       remoteGeneration: string,
@@ -241,7 +257,7 @@ export default function NetplayRoom({
             signal: value,
           }),
         opened: () => {
-          if (stopped) return;
+          if (stopped || peers.get(id)?.peer !== peer) return;
           game.attach(member.slot, (data) => peer.send(data));
           if (
             [...peers.values()].every(
@@ -256,36 +272,15 @@ export default function NetplayRoom({
           peers.get(id)?.peer === peer
             ? game.receive(member.slot, data)
             : Promise.resolve(),
-        disconnected: () => {
-          if (stopped) return;
-          game.disconnect(member.slot);
-          if (!host && !reconnectTimer) {
-            if (started.current)
-              send({ type: "elect-host", hostId: room.hostId });
-            reconnectTimer = setTimeout(() => {
-              if (!stopped) setReconnection((n) => n + 1);
-            }, 1500);
-          }
-        },
-        error: (message) => {
-          if (stopped) return;
-          if (host) {
-            game.disconnect(member.slot);
-            peer.close();
-          } else {
-            game.fail(Error(message));
-            if (started.current)
-              send({ type: "elect-host", hostId: room.hostId });
-            peer.close();
-            if (!reconnectTimer)
-              reconnectTimer = setTimeout(() => {
-                if (!stopped) setReconnection((n) => n + 1);
-              }, 1500);
-          }
-          if (message.includes("incompatível")) setError(message);
-        },
+        disconnected: () => recoverPeer(id, peer),
+        error: (message) => recoverPeer(id, peer, message),
       });
-      peers.set(id, { peer, id: connection, remoteGeneration });
+      peers.set(id, {
+        peer,
+        id: connection,
+        remoteGeneration,
+        slot: member.slot,
+      });
       return peer;
     };
     const receive = (from: string, value: Signal) => {
@@ -298,11 +293,11 @@ export default function NetplayRoom({
       if (value.kind === "netplay-ready") {
         const previous = remoteReady.get(from);
         remoteReady.set(from, value.generation);
-        if (previous !== value.generation)
+        if (previous !== value.generation || !peers.has(from))
           signal(from, { kind: "netplay-ready", generation });
         if (host && previous !== value.generation) {
           const peer = make(from, value.generation);
-          if (peer) void peer.offer().catch((e) => game.fail(e));
+          if (peer) void peer.offer().catch(() => recoverPeer(from, peer));
         }
       } else if (
         value.kind === "netplay" &&
@@ -334,11 +329,14 @@ export default function NetplayRoom({
           entry = peers.get(from);
         }
         if (entry?.id === value.connection) {
+          const peer = entry.peer;
           for (const item of earlyCandidates.get(value.connection) ?? [])
             if (item.kind === "netplay")
-              void entry.peer.accept(item.signal).catch((e) => game.fail(e));
+              void peer
+                .accept(item.signal)
+                .catch(() => recoverPeer(from, peer));
           earlyCandidates.delete(value.connection);
-          void entry.peer.accept(value.signal).catch((e) => game.fail(e));
+          void peer.accept(value.signal).catch(() => recoverPeer(from, peer));
         }
       }
     };
@@ -361,15 +359,14 @@ export default function NetplayRoom({
           peers.get(member.id)?.peer.pc.connectionState !== "connected"
         )
           signal(member.id, { kind: "netplay-ready", generation });
-    }, 5000);
+    }, 2000);
     const update = () => {
       const roster = membersRef.current;
       for (const [id, entry] of peers)
         if (!roster.some((p) => p.id === id)) {
           entry.peer.close();
           peers.delete(id);
-          const removed = members.find((p) => p.id === id);
-          if (removed) game.disconnect(removed.slot);
+          game.disconnect(entry.slot);
         }
       game.setMembers(
         // Reserved offline slots remain valid protocol positions. Presence can
@@ -619,6 +616,8 @@ export default function NetplayRoom({
           data-verified-frame={status.verifiedFrame}
           data-corrections={status.corrections}
           data-fps={status.fps}
+          data-phase={status.phase}
+          data-input-delay={status.inputDelay}
         >
           <span className={status.phase === "running" ? "online" : ""}>
             {status.message}

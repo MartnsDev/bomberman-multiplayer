@@ -1,6 +1,8 @@
 import { z } from "zod";
-export const NETPLAY_PROTOCOL = 3;
+export const NETPLAY_PROTOCOL = 4;
 export const MAX_FRAME_AHEAD = 256;
+// Returning clients may receive several seconds of commits in one network burst.
+export const MAX_BUFFERED_COMMITS = 1024;
 export const MASK = 4095;
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 export const compatibilitySchema = z

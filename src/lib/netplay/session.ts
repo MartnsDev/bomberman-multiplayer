@@ -12,6 +12,11 @@ import {
   type Compatibility,
 } from "./protocol";
 import { sha256 } from "./local-rom";
+import {
+  packSnapshot,
+  unpackSnapshot,
+  type SnapshotEncoding,
+} from "./snapshot";
 const epoch = z.string().uuid(),
   frame = z.number().int().min(0).max(2147483647),
   hash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -19,7 +24,11 @@ const FRAME_MS = 1000 / 60.0988;
 const MAX_DELAY = 24;
 const wire = z.discriminatedUnion("type", [
   z
-    .object({ type: z.literal("hello"), compatibility: compatibilitySchema })
+    .object({
+      type: z.literal("hello"),
+      compatibility: compatibilitySchema,
+      gzip: z.boolean(),
+    })
     .strict(),
   frameInputSchema,
   z
@@ -42,6 +51,8 @@ const wire = z.discriminatedUnion("type", [
       epoch,
       frame,
       size: z.number().int().min(1).max(2097152),
+      rawSize: z.number().int().min(1).max(2097152),
+      encoding: z.enum(["raw", "gzip"]),
       hash,
       corrections: z.number().int().min(0).max(3),
       joining: z.boolean(),
@@ -113,6 +124,7 @@ type Link = {
   activeFrom?: number;
   lastInput: number;
   validated: boolean;
+  gzip: boolean;
   joining?: { frame: number; hash?: string; buffer: unknown[]; sent: boolean };
 };
 export class NetplaySession {
@@ -121,6 +133,7 @@ export class NetplaySession {
   private replica?: LockstepReplica;
   private epoch = "";
   private held = 0;
+  private pendingPress = 0;
   private delay = 6;
   private automaticDelay = true;
   private pendingDelay?: { frame: number; delay: number };
@@ -135,6 +148,8 @@ export class NetplaySession {
     epoch: string;
     frame: number;
     size: number;
+    rawSize: number;
+    encoding: SnapshotEncoding;
     hash: string;
     chunks: Uint8Array[];
     received: number;
@@ -186,6 +201,7 @@ export class NetplaySession {
     this.raf = requestAnimationFrame(this.tick);
     this.heartbeat = setInterval(() => {
       for (const link of this.links.values()) {
+        if (!link.ready || link.joining) continue;
         const now = performance.now();
         if (link.ping === undefined || now - link.ping > 6000) {
           link.ping = now;
@@ -261,11 +277,13 @@ export class NetplaySession {
       rtt: 0,
       lastInput: performance.now(),
       validated: false,
+      gzip: false,
     };
     this.links.set(slot, link);
     this.send(link, {
       type: "hello",
       compatibility: this.options.compatibility,
+      gzip: typeof DecompressionStream !== "undefined",
     });
   }
   disconnect(slot: number) {
@@ -321,6 +339,10 @@ export class NetplaySession {
     this.coordinator?.deactivate(slot);
     link.activeFrom = undefined;
     link.validated = false;
+    // Loading a snapshot serializes messages on the returning channel. Never
+    // count that local work as network RTT for the rest of the room.
+    link.ping = undefined;
+    link.rtt = 0;
     const joining = {
       frame: this.frame,
       buffer: [] as unknown[],
@@ -330,7 +352,11 @@ export class NetplaySession {
     link.joining = joining;
     const snapshot = this.options.core.save(),
       currentEpoch = this.epoch;
-    joining.hash = await sha256(snapshot);
+    const [digest, packed] = await Promise.all([
+      sha256(snapshot),
+      packSnapshot(snapshot, link.gzip),
+    ]);
+    joining.hash = digest;
     if (
       this.stopped ||
       this.links.get(slot) !== link ||
@@ -342,13 +368,15 @@ export class NetplaySession {
       type: "snapshot",
       epoch: this.epoch,
       frame: joining.frame,
-      size: snapshot.length,
+      size: packed.bytes.length,
+      rawSize: snapshot.length,
+      encoding: packed.encoding,
       hash: joining.hash,
       corrections: this.status.corrections,
       joining: true,
     });
-    for (let at = 0; at < snapshot.length; at += 16384)
-      link.send(snapshot.subarray(at, at + 16384));
+    for (let at = 0; at < packed.bytes.length; at += 16384)
+      link.send(packed.bytes.subarray(at, at + 16384));
     this.send(link, { type: "snapshot-end", epoch: this.epoch });
     this.send(link, {
       type: "start",
@@ -358,16 +386,37 @@ export class NetplaySession {
       automatic: this.automaticDelay,
       activeSlots: this.activeSlots(),
     });
+    // The returning peer may have missed an adjustment while paused. Replay it
+    // after START and before commits, so its input window cannot remain stale.
+    if (this.pendingDelay)
+      this.send(link, {
+        type: "delay",
+        epoch: this.epoch,
+        ...this.pendingDelay,
+      });
     for (const commit of joining.buffer) this.send(link, commit);
     joining.buffer = [];
     joining.sent = true;
     this.roster();
   }
   setButtons(buttons: number[]) {
-    this.held = buttons.reduce(
+    const next = buttons.reduce(
       (m, b) => (Number.isInteger(b) && b >= 0 && b < 12 ? m | (1 << b) : m),
       0,
     );
+    // Preserve brief action taps even if down/up both arrive before a frame.
+    // Directions always use their latest state, without latching opposites.
+    if (this.running) this.pendingPress |= next & ~this.held & ~0xf0;
+    this.held = next;
+  }
+  private sampleButtons() {
+    const mask = this.held | this.pendingPress;
+    this.pendingPress = 0;
+    return mask;
+  }
+  private submitThrough(last: number) {
+    for (let f = this.submittedFrame + 1; f <= last; f++)
+      this.submit(f, this.sampleButtons());
   }
   setDelay(delay: number | "auto") {
     if (
@@ -383,7 +432,16 @@ export class NetplaySession {
   private desiredDelay() {
     const rtt = Math.max(
       0,
-      ...[...this.links.values()].map((link) => link.rtt),
+      ...[...this.links.values()]
+        .filter(
+          (link) =>
+            link.ready &&
+            !link.joining &&
+            (!this.hasStarted ||
+              link.activeFrom !== undefined ||
+              performance.now() - link.lastInput < 1000),
+        )
+        .map((link) => link.rtt),
     );
     return Math.min(MAX_DELAY, Math.max(6, Math.ceil(rtt / FRAME_MS) + 3));
   }
@@ -443,6 +501,15 @@ export class NetplaySession {
     }
     if (packet.type === "hello") {
       if (!compatible(this.options.compatibility, packet.compatibility)) {
+        if (this.options.host && this.hasStarted) {
+          this.send(link, {
+            type: "pause",
+            message:
+              "ROM ou emulador incompatível. Atualize e confira a instalação deste aparelho.",
+          });
+          this.disconnect(slot);
+          return;
+        }
         this.pause(
           "ROM, versão do core ou configuração diferente. Instale a mesma versão em todos os aparelhos.",
           this.options.host,
@@ -451,13 +518,17 @@ export class NetplaySession {
       }
       if (link.ready) return;
       link.ready = true;
+      link.gzip = packet.gzip;
       // A channel may deliver the first HELLO just before the other peer's
       // onopen registers its link. Reply once after validation so both sides
       // complete the handshake; already-ready peers never echo duplicates.
       this.send(link, {
         type: "hello",
         compatibility: this.options.compatibility,
+        gzip: typeof DecompressionStream !== "undefined",
       });
+      link.ping = performance.now();
+      this.send(link, { type: "ping", time: link.ping });
       if (!this.running)
         this.publish("ROM e core compatíveis. Preparando a sincronização…");
       if (this.options.host) {
@@ -521,12 +592,13 @@ export class NetplaySession {
         bytes.set(chunk, offset);
         offset += chunk.length;
       }
-      if ((await sha256(bytes)) !== r.hash)
+      const raw = await unpackSnapshot(bytes, r.encoding, r.rawSize);
+      if ((await sha256(raw)) !== r.hash)
         throw Error(
           "O estado recebido não passou na verificação de integridade.",
         );
       if (this.stopped) return;
-      this.options.core.load(bytes, r.frame);
+      this.options.core.load(raw, r.frame);
       this.epoch = r.epoch;
       this.status.verifiedFrame = r.frame;
       this.reception = undefined;
@@ -555,6 +627,8 @@ export class NetplaySession {
         }
         link.validated = true;
         link.joining = undefined;
+        link.ping = performance.now();
+        this.send(link, { type: "ping", time: link.ping });
         return;
       }
       if (packet.frame !== this.frame) return;
@@ -607,8 +681,11 @@ export class NetplaySession {
     } else if (packet.type === "input") {
       if (!this.options.host)
         throw Error("Entradas devem passar pelo coordenador.");
-      if (!this.running || !link.validated || packet.frame < this.frame) return;
+      if (!this.running || !link.validated) return;
+      if (packet.slot !== slot)
+        throw Error("Entrada de outro controle ou quadro inválido.");
       link.lastInput = performance.now();
+      if (packet.frame < this.frame) return;
       const result = this.coordinator?.receive(slot, packet);
       if (result === "accepted" && link.activeFrom === undefined) {
         link.activeFrom = packet.frame;
@@ -621,13 +698,24 @@ export class NetplaySession {
       if (this.options.host)
         throw Error("Somente o anfitrião pode confirmar quadros.");
       if (!this.running) return;
-      if (!this.replica?.receive(packet) && packet.frame >= this.frame) {
+      const accepted = this.replica?.receive(packet);
+      if (!accepted && packet.frame >= this.frame) {
         this.running = false;
         this.publish(
           "Atualizando seu aparelho; os demais continuam jogando…",
           "preparing",
         );
         this.send(link, { type: "resync-request", epoch: this.epoch });
+      }
+      if (accepted) {
+        // Input follows confirmed coordinator time, independent of rendering.
+        // A slow local display must not send permanently stale controls.
+        const inputFrame = packet.frame + 1;
+        if (this.pendingDelay && inputFrame >= this.pendingDelay.frame) {
+          this.delay = this.pendingDelay.delay;
+          this.pendingDelay = undefined;
+        }
+        this.submitThrough(inputFrame + this.delay);
       }
     } else if (packet.type === "hash") {
       if (
@@ -674,20 +762,29 @@ export class NetplaySession {
     this.options.core.load(state, frameNumber);
     this.canonicalHash = await sha256(this.options.core.save());
     const digest = await sha256(state);
+    const packed = await packSnapshot(
+      state,
+      [...this.links.values()].some((link) => link.gzip),
+    );
     if (generation !== this.generation || this.stopped) return;
     for (const link of this.links.values()) {
       link.ack = undefined;
+      const payload = link.gzip
+        ? packed
+        : { bytes: state, encoding: "raw" as const };
       this.send(link, {
         type: "snapshot",
         epoch: this.epoch,
         frame: frameNumber,
-        size: state.length,
+        size: payload.bytes.length,
+        rawSize: state.length,
+        encoding: payload.encoding,
         hash: digest,
         corrections: this.status.corrections,
         joining: false,
       });
-      for (let at = 0; at < state.length; at += 16384)
-        link.send(state.subarray(at, at + 16384));
+      for (let at = 0; at < payload.bytes.length; at += 16384)
+        link.send(payload.bytes.subarray(at, at + 16384));
       this.send(link, { type: "snapshot-end", epoch: this.epoch });
     }
     if (!this.links.size) {
@@ -727,6 +824,7 @@ export class NetplaySession {
     this.lowLatencySince = undefined;
     const first = this.frame;
     this.submittedFrame = first - 1;
+    this.pendingPress = 0;
     this.coordinator = this.options.host
       ? new LockstepCoordinator(this.epoch, this.options.slots, first)
       : undefined;
@@ -743,7 +841,7 @@ export class NetplaySession {
     this.metricTime = this.nextDue;
     this.metricFrames = 0;
     for (let f = first; f < first + delay; f++) this.submit(f, 0);
-    this.submit(first + delay, this.held);
+    this.submit(first + delay, this.sampleButtons());
     this.publish("Emulação local sincronizada.", "running");
   }
   private submit(frame: number, mask: number) {
@@ -758,38 +856,17 @@ export class NetplaySession {
     if (!this.running || this.checking || now < this.nextDue) return;
     try {
       if (this.options.host) {
-        let missedDeadline = false;
         for (const s of this.coordinator?.missingSlots() ?? [])
           if (
             s !== this.options.slot &&
             (this.firstCommitted || now >= this.startDeadline)
           ) {
             const link = this.links.get(s);
-            missedDeadline ||= link?.activeFrom !== undefined;
             this.coordinator?.deactivate(s);
             if (link) link.activeFrom = undefined;
             this.roster();
           }
-        // RTT alone misses scheduling jitter on busy phones. Enlarge the shared
-        // input window when an active pad misses its deadline, while still
-        // neutralizing that pad immediately so everybody else keeps moving.
-        if (
-          missedDeadline &&
-          this.automaticDelay &&
-          !this.pendingDelay &&
-          this.delay < MAX_DELAY
-        ) {
-          this.lowLatencySince = undefined;
-          this.pendingDelay = {
-            frame: this.frame + this.delay + 2,
-            delay: Math.min(MAX_DELAY, this.delay + 2),
-          };
-          this.broadcast({
-            type: "delay",
-            epoch: this.epoch,
-            ...this.pendingDelay,
-          });
-        }
+        // A departed pad becomes neutral without raising everybody's delay.
         const commit = this.coordinator?.take();
         if (commit) {
           this.firstCommitted = true;
@@ -818,8 +895,7 @@ export class NetplaySession {
         }
         // Fill newly added future frames with this player's actual held input.
         // Never overwrite an existing frame or predict another player's input.
-        for (let f = this.submittedFrame + 1; f <= this.frame + this.delay; f++)
-          this.submit(f, this.held);
+        if (this.options.host) this.submitThrough(this.frame + this.delay);
         // Capture at the exact native frame; compare asynchronously. Healthy
         // sessions never stop the game merely to wait for a checksum RTT.
         if (this.frame % 120 === 0)
@@ -864,11 +940,9 @@ export class NetplaySession {
       for (const [old, values] of this.hashes)
         if (old < this.frame - 480) {
           this.hashes.delete(old);
-          if (this.activeSlots(old).some((s) => !values.has(s)))
-            this.pause(
-              "Não foi possível confirmar o estado de todos. Ressincronize a partida.",
-              true,
-            );
+          for (const slot of this.activeSlots(old))
+            if (slot !== this.options.slot && !values.has(slot))
+              void this.join(slot).catch(() => this.disconnect(slot));
         }
     } else
       for (const link of this.links.values())
@@ -903,6 +977,7 @@ export class NetplaySession {
   }
   pause(message: string, broadcast = this.options.host) {
     this.running = false;
+    this.pendingPress = 0;
     this.generation++;
     if (broadcast)
       this.broadcast({ type: "pause", message: message.slice(0, 200) });

@@ -5,7 +5,7 @@ import type { Compatibility } from "../src/lib/netplay/protocol";
 import { setImmediate as settle } from "node:timers/promises";
 
 const compatibility: Compatibility = {
-  protocol: 3,
+  protocol: 4,
   rom: "a".repeat(64),
   core: "b".repeat(64),
   settings: "c".repeat(64),
@@ -94,10 +94,19 @@ async function room(count: number, latency = 0, loseFirstHello = false) {
     data: string | ArrayBuffer;
   };
   const dropped = new Set<number>();
+  const droppedHashes = new Set<number>();
   const queue: Delivery[] = [],
     dueByLink = new Map<string, number>();
   let retransmit = 0;
+  let delayedAck: { slot: number; ms: number } | undefined;
+  const delaysSent: number[] = [];
   const send = (from: number, to: number) => (data: string | Uint8Array) => {
+    if (
+      from === 0 &&
+      typeof data === "string" &&
+      JSON.parse(data).type === "delay"
+    )
+      delaysSent.push(JSON.parse(data).delay);
     if (
       loseFirstHello &&
       from === 1 &&
@@ -112,8 +121,22 @@ async function room(count: number, latency = 0, loseFirstHello = false) {
     const isInput =
       typeof data === "string" && JSON.parse(data).type === "input";
     if (isInput && dropped.has(from)) return;
-    const extra = isInput ? retransmit : 0;
+    if (
+      typeof data === "string" &&
+      JSON.parse(data).type === "hash" &&
+      droppedHashes.has(from)
+    )
+      return;
+    let extra = isInput ? retransmit : 0;
     if (extra) retransmit = 0;
+    if (
+      typeof data === "string" &&
+      JSON.parse(data).type === "ack" &&
+      delayedAck?.slot === from
+    ) {
+      extra = delayedAck.ms;
+      delayedAck = undefined;
+    }
     const due = Math.max(now + latency + extra, dueByLink.get(key) ?? 0);
     dueByLink.set(key, due);
     const copy = typeof data === "string" ? data : new Uint8Array(data).buffer;
@@ -152,17 +175,30 @@ async function room(count: number, latency = 0, loseFirstHello = false) {
     statuses,
     advance,
     stalled,
+    delaysSent,
+    delayNextAck: (slot: number, ms: number) => {
+      delayedAck = { slot, ms };
+    },
     freeze: (slot: number, value: boolean) => {
       if (value) frozen.add(slot);
       else frozen.delete(slot);
     },
     reconnect: (slot = 1) => {
+      // Closing a real DataPeer discards its pending traffic and uses a new
+      // connection identity. Do not deliver old-channel packets to its replacement.
+      for (let i = queue.length - 1; i >= 0; i--)
+        if (queue[i].from === slot || queue[i].to === slot) queue.splice(i, 1);
+      dueByLink.delete(`0:${slot}`);
+      dueByLink.delete(`${slot}:0`);
       sessions[0].attach(slot, send(0, slot));
       sessions[slot].attach(0, send(slot, 0));
     },
     dropInput: (slot: number, drop: boolean) => {
       if (drop) dropped.add(slot);
       else dropped.delete(slot);
+    },
+    dropHashes: (slot: number) => {
+      droppedHashes.add(slot);
     },
     loseNextInput: () => {
       retransmit = 220;
@@ -173,6 +209,115 @@ async function room(count: number, latency = 0, loseFirstHello = false) {
   };
 }
 describe("sessão determinística completa", () => {
+  it("não usa o tempo de restauração no retorno como latência da sala", async () => {
+    const r = await room(3);
+    r.sessions[0].start();
+    await r.advance(90);
+    const delay = r.statuses[0].inputDelay;
+    r.sessions[0].disconnect(2);
+    r.sessions[2].disconnect(0);
+    r.delayNextAck(2, 500);
+    r.reconnect(2);
+    await r.advance(100);
+    expect(r.statuses[0].inputDelay).toBe(delay);
+    expect(
+      r.statuses.every((s) => s.phase === "running" && s.corrections === 0),
+    ).toBe(true);
+  });
+
+  it("mantém o atraso agendado ao retornar durante uma mudança de rede", async () => {
+    const r = await room(3);
+    r.sessions[0].start();
+    await r.advance(140);
+    r.setLatency(80);
+    for (let i = 0; i < 150 && !r.delaysSent.length; i++) await r.advance(1);
+    expect(r.delaysSent.length).toBeGreaterThan(0);
+    r.sessions[0].disconnect(2);
+    r.sessions[2].disconnect(0);
+    r.reconnect(2);
+    await r.advance(180);
+    expect(
+      r.statuses.every(
+        (s) =>
+          s.phase === "running" && s.inputDelay >= 13 && s.corrections === 0,
+      ),
+    ).toBe(true);
+  });
+  it("isola um participante incompatível sem parar a partida dos demais", async () => {
+    const r = await room(3);
+    r.sessions[0].start();
+    await r.advance(140);
+    const before = r.cores[0].frame();
+    await r.sessions[0].receive(
+      2,
+      JSON.stringify({
+        type: "hello",
+        gzip: false,
+        compatibility: { ...compatibility, rom: "d".repeat(64) },
+      }),
+    );
+    await r.advance(150);
+    expect(r.cores[0].frame()).toBeGreaterThan(before + 140);
+    expect(
+      [r.statuses[0], r.statuses[1]].every((s) => s.phase === "running"),
+    ).toBe(true);
+  });
+  it("não perde um toque rápido de bomba entre dois quadros", async () => {
+    const r = await room(3);
+    r.sessions[0].start();
+    await r.advance(140);
+    const start = r.cores[0].inputs.length;
+    r.sessions[2].setButtons([8]);
+    r.sessions[2].setButtons([]);
+    await r.advance(50);
+    expect(
+      r.cores[0].inputs.slice(start).filter((m) => m[2] === 256),
+    ).toHaveLength(1);
+    expect(r.cores[0].inputs.slice(-15).every((m) => m[2] === 0)).toBe(true);
+  });
+  it("envia controles pelo relógio confirmado mesmo quando a imagem local está atrasada", async () => {
+    const r = await room(3);
+    r.sessions[0].start();
+    await r.advance(140);
+    r.freeze(2, true);
+    await r.advance(80);
+    const at = r.cores[0].inputs.length;
+    r.sessions[2].setButtons([7]);
+    await r.advance(35);
+    expect(r.cores[0].inputs.slice(at).some((m) => m[2] === 128)).toBe(true);
+    r.sessions[2].setButtons([]);
+    await r.advance(35);
+    expect(r.cores[0].inputs.slice(-20).every((m) => m[2] === 0)).toBe(true);
+    r.freeze(2, false);
+    await r.advance(150);
+    expect(
+      r.statuses.every((s) => s.phase === "running" && s.corrections === 0),
+    ).toBe(true);
+  });
+  it("não aumenta o atraso dos demais por uma saída silenciosa", async () => {
+    const r = await room(3);
+    r.sessions[0].start();
+    await r.advance(140);
+    const delay = r.statuses[0].inputDelay;
+    r.dropInput(2, true);
+    await r.advance(160);
+    expect(r.statuses[0].inputDelay).toBe(delay);
+    expect(r.statuses[1].inputDelay).toBe(delay);
+  });
+  it("atualiza só o convidado sem confirmação de estado, sem pausar os demais", async () => {
+    const r = await room(3);
+    r.sessions[0].start();
+    await r.advance(140);
+    r.dropHashes(2);
+    const before = r.cores[0].frame();
+    await r.advance(800);
+    expect(r.cores[0].frame()).toBeGreaterThan(before + 760);
+    expect(
+      [r.statuses[0], r.statuses[1]].every(
+        (s) => s.phase === "running" && s.corrections === 0,
+      ),
+    ).toBe(true);
+  });
   it("solicita eleição quando o coordenador congela mesmo mantendo o canal aberto", async () => {
     const r = await room(3);
     r.sessions[0].start();
@@ -357,7 +502,7 @@ describe("sessão determinística completa", () => {
     await r.advance(150);
     expect(r.cores[0].frame()).toBeGreaterThan(f + 140);
     expect(r.statuses[0].activeSlots).not.toContain(2);
-    expect(r.statuses.every((s) => s.inputDelay >= 8)).toBe(true);
+    expect(r.statuses.every((s) => s.inputDelay === 6)).toBe(true);
     expect(r.cores[0].inputs.slice(-30).every((m) => m[2] === 0)).toBe(true);
     r.dropInput(2, false);
     await r.advance(150);

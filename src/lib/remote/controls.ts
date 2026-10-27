@@ -26,6 +26,7 @@ export function bindControls(
     event.preventDefault();
     if (event.type === "keydown") keyboard.add(b);
     else keyboard.delete(b);
+    if (event.type === "keydown" && !document.hidden) enabled = true;
     emit();
   };
   const forwarded = (event: Event) => {
@@ -36,13 +37,16 @@ export function bindControls(
     if (b < 0) return;
     if (down) keyboard.add(b);
     else keyboard.delete(b);
+    if (down && !document.hidden) enabled = true;
     emit();
   };
   const focus = () => {
     enabled = true;
+    emit();
   };
   const touched = () => {
-    enabled = true;
+    // Clearing touch during blur is not a new gesture and must not wake a pad.
+    if (touch.size && !document.hidden) enabled = true;
     emit();
   };
   const blur = () => {
@@ -86,7 +90,9 @@ export function bindControls(
   const stopGamepad = () => {
     cancelAnimationFrame(frame);
     frame = 0;
-    flush();
+    // A gamepad disconnect must release only its own input. Clearing the shared
+    // touch set leaves a still-held finger visually pressed but permanently mute.
+    emit();
     startGamepad();
   };
   window.addEventListener("bomber-touch", touched);

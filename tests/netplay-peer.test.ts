@@ -2,6 +2,16 @@ import { afterEach, it, expect, vi } from "vitest";
 import { DataPeer } from "../src/lib/netplay/peer";
 class Connection {
   connectionState = "new";
+  localDescription = { type: "offer", sdp: "test" };
+  createOffer() {
+    return Promise.resolve({ type: "offer" as const, sdp: "test" });
+  }
+  setLocalDescription() {
+    return Promise.resolve();
+  }
+  setRemoteDescription() {
+    return Promise.resolve();
+  }
   onconnectionstatechange?: () => void;
   close() {
     this.connectionState = "closed";
@@ -60,4 +70,39 @@ it("não espera o prazo de oscilação quando o transporte falha definitivamente
   h.state("failed");
   expect(h.disconnected).toHaveBeenCalledOnce();
   h.peer.close();
+});
+it("descarta falha de oferta que termina depois do fechamento do participante", async () => {
+  const h = setup();
+  let reject!: (e: Error) => void;
+  vi.spyOn(
+    h.peer.pc as unknown as Connection,
+    "createOffer",
+  ).mockReturnValueOnce(
+    new Promise((_, fail) => {
+      reject = fail;
+    }),
+  );
+  const operation = h.peer.offer();
+  h.peer.close();
+  reject(new DOMException("Closed", "InvalidStateError"));
+  await expect(operation).resolves.toBeUndefined();
+});
+it("descarta resposta de negociação encerrada ao sair da sala", async () => {
+  const h = setup();
+  let reject!: (e: Error) => void;
+  vi.spyOn(
+    h.peer.pc as unknown as Connection,
+    "setRemoteDescription",
+  ).mockReturnValueOnce(
+    new Promise((_, fail) => {
+      reject = fail;
+    }),
+  );
+  const operation = h.peer.accept({
+    kind: "description",
+    description: { type: "offer", sdp: "test" },
+  });
+  h.peer.close();
+  reject(new DOMException("Closed", "InvalidStateError"));
+  await expect(operation).resolves.toBeUndefined();
 });

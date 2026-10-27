@@ -122,31 +122,46 @@ export class DataPeer {
   }
   async offer() {
     if (this.closed) return;
-    await this.pc.setLocalDescription(await this.pc.createOffer());
-    if (this.closed) return;
-    this.options.signal({
-      kind: "description",
-      description: { type: "offer", sdp: this.pc.localDescription!.sdp },
-    });
+    try {
+      const description = await this.pc.createOffer();
+      if (this.closed) return;
+      await this.pc.setLocalDescription(description);
+      if (this.closed) return;
+      this.options.signal({
+        kind: "description",
+        description: { type: "offer", sdp: this.pc.localDescription!.sdp },
+      });
+    } catch (error) {
+      if (!this.closed) throw error;
+    }
   }
   async accept(signal: Signal) {
     if (this.closed) return;
-    if (signal.kind === "candidate") {
-      if (this.pc.remoteDescription)
-        await this.pc.addIceCandidate(signal.candidate);
-      else this.candidates.push(signal.candidate);
-      return;
-    }
-    await this.pc.setRemoteDescription(signal.description);
-    if (this.closed) return;
-    for (const candidate of this.candidates.splice(0))
-      await this.pc.addIceCandidate(candidate);
-    if (signal.description.type === "offer") {
-      await this.pc.setLocalDescription(await this.pc.createAnswer());
-      this.options.signal({
-        kind: "description",
-        description: { type: "answer", sdp: this.pc.localDescription!.sdp },
-      });
+    try {
+      if (signal.kind === "candidate") {
+        if (this.pc.remoteDescription)
+          await this.pc.addIceCandidate(signal.candidate);
+        else this.candidates.push(signal.candidate);
+        return;
+      }
+      await this.pc.setRemoteDescription(signal.description);
+      if (this.closed) return;
+      for (const candidate of this.candidates.splice(0)) {
+        if (this.closed) return;
+        await this.pc.addIceCandidate(candidate);
+      }
+      if (signal.description.type === "offer") {
+        const answer = await this.pc.createAnswer();
+        if (this.closed) return;
+        await this.pc.setLocalDescription(answer);
+        if (this.closed) return;
+        this.options.signal({
+          kind: "description",
+          description: { type: "answer", sdp: this.pc.localDescription!.sdp },
+        });
+      }
+    } catch (error) {
+      if (!this.closed) throw error;
     }
   }
   close() {
