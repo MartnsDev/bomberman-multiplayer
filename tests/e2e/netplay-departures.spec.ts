@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type CDPSession } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 const rom = process.env.TEST_ROM_PATH;
 const frame = (p: Page) =>
@@ -17,6 +17,53 @@ const running = (p: Page) =>
 const verified = (p: Page) =>
   p.locator(".netplay-status").getAttribute("data-verified-frame").then(Number);
 
+async function press(p: Page, cdp: CDPSession, down: boolean) {
+  if (!down) {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
+    return;
+  }
+  const b = p
+    .locator(".touch-controls")
+    .getByRole("button", { name: "Cima", exact: true });
+  await b.scrollIntoViewIfNeeded();
+  const box = await b.boundingBox();
+  if (!box) throw Error("Direcional ausente");
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [
+      { id: 1, x: box.x + box.width / 2, y: box.y + box.height / 2 },
+    ],
+  });
+  await expect(b).toHaveAttribute("aria-pressed", "true");
+}
+async function received(p: Page, slot: number, mask: number) {
+  const start = await frame(p);
+  await expect.poll(() => frame(p)).toBeGreaterThan(start + 45);
+  await expect
+    .poll(() =>
+      p.evaluate(
+        ({ slot, mask }) => {
+          const samples = (window as any).__controlSamples as number[][];
+          return (
+            samples.length >= 10 &&
+            samples.slice(-10).every((m) => m[slot] === mask)
+          );
+        },
+        { slot, mask },
+      ),
+    )
+    .toBe(true);
+}
+async function probeControls(p: Page, cdp: CDPSession, slot: number) {
+  await press(p, cdp, true);
+  await received(p, slot, 16);
+  await press(p, cdp, false);
+  await received(p, slot, 0);
+}
+
 test("instalação prévia, convidado recarrega e coordenador sai sem encerrar a partida", async ({
   browser,
   baseURL,
@@ -33,10 +80,12 @@ test("instalação prévia, convidado recarrega e coordenador sai sem encerrar a
     ),
   );
   const pages = await Promise.all(contexts.map((c) => c.newPage()));
+  const devices: CDPSession[] = [];
   const requests: string[] = [],
     errors: string[] = [];
   for (const p of pages) {
     const device = await p.context().newCDPSession(p);
+    devices.push(device);
     await device.send("Emulation.setFocusEmulationEnabled", { enabled: true });
     await p.addInitScript(() => {
       const raf = window.requestAnimationFrame.bind(window);
@@ -48,6 +97,19 @@ test("instalação prévia, convidado recarrega e coordenador sai sem encerrar a
           }
           callback(now);
         });
+      window.addEventListener("bomber-netplay-ready", () => {
+        const core = (document.querySelector("iframe") as HTMLIFrameElement)
+          .contentWindow as any;
+        const original = core.__bomberNetplay.step.bind(core.__bomberNetplay);
+        (window as any).__controlSamples = [];
+        core.__bomberNetplay.step = (masks: number[]) => {
+          const result = original(masks);
+          const samples = (window as any).__controlSamples as number[][];
+          samples.push([...masks]);
+          if (samples.length > 120) samples.shift();
+          return result;
+        };
+      });
       const Native = window.RTCPeerConnection;
       (window as any).__departurePCs = [];
       window.RTCPeerConnection = class extends Native {
@@ -66,18 +128,19 @@ test("instalação prévia, convidado recarrega e coordenador sai sem encerrar a
   }
   const [h, g, t] = pages;
   try {
-    expect(
-      (
-        await contexts[0].request.post(`${baseURL}/api/auth`, {
-          headers: { Origin: baseURL! },
-          data: {
-            password: (
-              await readFile(".private/local-owner-password", "utf8")
-            ).trim(),
-          },
-        })
-      ).status(),
-    ).toBe(200);
+    if (process.env.TEST_PUBLIC_HOST !== "1")
+      expect(
+        (
+          await contexts[0].request.post(`${baseURL}/api/auth`, {
+            headers: { Origin: baseURL! },
+            data: {
+              password: (
+                await readFile(".private/local-owner-password", "utf8")
+              ).trim(),
+            },
+          })
+        ).status(),
+      ).toBe(200);
     const manifest = await (
       await contexts[1].request.get(`${baseURL}/manifest.webmanifest`)
     ).json();
@@ -197,6 +260,7 @@ test("instalação prévia, convidado recarrega e coordenador sai sem encerrar a
       expect(await p.evaluate(() => (window as any).__survivorPaused)).toBe(
         false,
       );
+    await probeControls(g, devices[1], 1);
     await t
       .getByRole("button", { name: "Entrar em sala ↗", exact: true })
       .click();
@@ -209,6 +273,8 @@ test("instalação prévia, convidado recarrega e coordenador sai sem encerrar a
       .poll(() => verified(h), { timeout: 30000 })
       .toBeGreaterThan(await frame(t));
     // Close the original coordinator. The next player keeps its original pad.
+    await press(g, devices[1], true);
+    await received(g, 1, 16);
     const handoff = await frame(g);
     await h.close();
     await expect(
@@ -230,6 +296,12 @@ test("instalação prévia, convidado recarrega e coordenador sai sem encerrar a
     expect((await contexts[1].request.get(`${baseURL}/api/rom`)).status()).toBe(
       401,
     );
+    await received(g, 1, 16);
+    await received(t, 1, 16);
+    await press(g, devices[1], false);
+    await received(t, 1, 0);
+    await probeControls(g, devices[1], 1);
+    await probeControls(t, devices[2], 2);
     // Announced backgrounding yields the coordinator before the browser freezes.
     await g.evaluate(() => {
       Object.defineProperty(document, "hidden", {
@@ -257,6 +329,8 @@ test("instalação prévia, convidado recarrega e coordenador sai sem encerrar a
     await expect
       .poll(() => verified(t), { timeout: 30000 })
       .toBeGreaterThan(await frame(g));
+    await probeControls(g, devices[1], 1);
+    await probeControls(t, devices[2], 2);
     // An abrupt freeze keeps RTC open: healthy peers must still elect a host.
     const frozenCoordinator = await frame(g);
     await t.evaluate(() => {
@@ -293,6 +367,8 @@ test("instalação prévia, convidado recarrega e coordenador sai sem encerrar a
     await expect
       .poll(() => verified(t), { timeout: 30000 })
       .toBeGreaterThan(rtcHandoff + 120);
+    await probeControls(g, devices[1], 1);
+    await probeControls(t, devices[2], 2);
     // An ordinary leave also releases its pad; the remaining player advances.
     if (
       (await g.locator(".play-surface").getAttribute("data-expanded")) ===
@@ -324,6 +400,8 @@ test("instalação prévia, convidado recarrega e coordenador sai sem encerrar a
       backgroundHost,
       frozenCoordinator,
       rtcHandoff,
+      touchPressReleaseAfterHandoffs: true,
+      heldTouchSurvivedCreatorExit: true,
       final: await frame(t),
       verified: await verified(t),
     });
