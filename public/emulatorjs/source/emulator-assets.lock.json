@@ -1,0 +1,10 @@
+{
+  "loader.js": "69e0903bf1e2f62ced78895e7e511fa26e11316f7eb734925c35e919ba1287b2",
+  "emulator.min.js": "6aec3fd7bb2721255801b0a6af02e47e78b05e28a1822b1f213aacbd348abaee",
+  "emulator.min.css": "16406c60b2dc3b04ae9b115e308613e6f567a0cc7068e21d9d0c1e5030fb395e",
+  "cores/snes9x-wasm.data": "eaa0bcfce67673809886e50387a80a616b719502175db64c090d04c9d75958ee",
+  "cores/snes9x-legacy-wasm.data": "7d427a575cefad98ff400493fa1d7e892da63fe7bab68979babd9cea0bfaaf3b",
+  "compression/extract7z.js": "4ac9933b995a516cb6b3ca4027db860278372a20c21c405d93ceb1998498853a",
+  "cores/reports/snes9x.json": "dc7ac963eb7935a7ac78956235ac0b8912ec785c57026336825aa2ed8031b3ad",
+  "localization/pt-BR.json": "6aced4ba66a75ffaac8b43db3e4bd1678e9d6a781b508ecf38a21b8bc3047474"
+}

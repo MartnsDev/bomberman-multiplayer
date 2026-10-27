@@ -1,0 +1,45 @@
+{
+  "id": "ejs-4.2.3-snes9x-netplay-v6",
+  "files": {
+    "cores/snes9x-wasm.data": {
+      "upstream": "eaa0bcfce67673809886e50387a80a616b719502175db64c090d04c9d75958ee",
+      "sha256": "80f6f49c935950a10746cbc9fd95f65d16a9da96f8d277b5597be87604a2bd67",
+      "wasm": "4348cad799e236d37e304a061899c62939490ea310b76fab78ff579f7ff9214e",
+      "originalWasm": "2bc7b519bc185af151cc7ebc42c0a926a125be174c6467c24bb0495820adf0bf",
+      "nativeExports": {
+        "netplay_run_frame": 2654,
+        "netplay_serialize": 2649,
+        "netplay_unserialize": 2648,
+        "netplay_serialize_size": 2650,
+        "netplay_reset": 2659,
+        "netplay_read_input": 8034,
+        "netplay_bind_input": 8035,
+        "netplay_video_pointer": 8037,
+        "netplay_video_width": 8038,
+        "netplay_video_height": 8039,
+        "netplay_video_pitch": 8040,
+        "netplay_native_frame": 8041
+      }
+    },
+    "cores/snes9x-legacy-wasm.data": {
+      "upstream": "7d427a575cefad98ff400493fa1d7e892da63fe7bab68979babd9cea0bfaaf3b",
+      "sha256": "2932a1fc70352c14707c763299d2b3029304ec0dc709d9ad24b43a41b6b71f45",
+      "wasm": "6aa1a719dba9a5145d63f0d555058051e753668ec69e3d9ed1aac80afd5e2be0",
+      "originalWasm": "c3b930598155256dae0e4f66f2bb05c5dd6fc2366fbb5048a34dd61db392d1cf",
+      "nativeExports": {
+        "netplay_run_frame": 2646,
+        "netplay_serialize": 2641,
+        "netplay_unserialize": 2640,
+        "netplay_serialize_size": 2642,
+        "netplay_reset": 2651,
+        "netplay_read_input": 8026,
+        "netplay_bind_input": 8027,
+        "netplay_video_pointer": 8029,
+        "netplay_video_width": 8030,
+        "netplay_video_height": 8031,
+        "netplay_video_pitch": 8032,
+        "netplay_native_frame": 8033
+      }
+    }
+  }
+}

@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="pt-BR">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  /><title>Bomberman · Emulação local</title>
+  <style>
+    html,
+    body,
+    #game {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: #030712;
+    }
+    canvas {
+      image-rendering: pixelated;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    .ejs_menu_bar {
+      display: none !important;
+    }
+  </style>
+  <div id="game"></div>
+  <script>
+    document.addEventListener("contextmenu", (event) => event.preventDefault());
+    document.addEventListener("dragstart", (event) => event.preventDefault());
+    window.addEventListener("error", () =>
+      parent.dispatchEvent(new CustomEvent("bomber-netplay-error")),
+    );
+    window.addEventListener("unhandledrejection", (event) => {
+      if (/wake lock/i.test(String(event.reason?.message))) return;
+      parent.dispatchEvent(new CustomEvent("bomber-netplay-error"));
+    });
+    // Parent and iframe have distinct TypedArray constructors. isView works
+    // across realms; instanceof Uint8Array would reject every installed ROM.
+    if (!ArrayBuffer.isView(parent.__bomberNetplayRom))
+      throw Error("Instale sua ROM local antes de iniciar o netplay.");
+    window.EJS_player = "#game";
+    window.EJS_core = "snes9x";
+    window.EJS_gameUrl = new Uint8Array(parent.__bomberNetplayRom);
+    window.EJS_gameName = "Super Bomberman 5";
+    window.EJS_pathtodata = "/netplay-emulatorjs/";
+    window.EJS_language = "pt-BR";
+    window.EJS_CacheLimit = 0;
+    window.EJS_threads = false;
+    window.EJS_forceLegacyCores = true;
+    window.EJS_disableDatabases = true;
+    window.EJS_disableLocalStorage = true;
+    window.EJS_startOnLoaded = false;
+    window.EJS_defaultOptions = {
+      shader: "disabled",
+      "virtual-gamepad": "disabled",
+    };
+    window.EJS_ready = () => {
+      const original = EJS_GameManager.prototype.getRetroArchCfg;
+      EJS_GameManager.prototype.getRetroArchCfg = function () {
+        return (
+          original.call(this) +
+          '\ninput_libretro_device_p1 = "1"\ninput_libretro_device_p2 = "257"\ninput_max_users = "5"\nautosave_interval = "0"\naudio_sync = "false"\naudio_rate_control = "false"\nvideo_vsync = "false"\nrewind_enable = "false"\n'
+        );
+      };
+      EJS_emulator.elements.parent.querySelector(".ejs_start_button").click();
+    };
+    window.EJS_onGameStart = async () => {
+      const e = EJS_emulator,
+        m = e.Module;
+      if (typeof m._netplay_run_frame !== "function")
+        throw Error(
+          "Core sem avanço nativo de quadros. Atualize os arquivos locais.",
+        );
+      // Cancel the Emscripten loop immediately. Only step() runs the SNES now;
+      // neither browser timers nor the old frontend frame counter advance it.
+      m.pauseMainLoop();
+      // callMain can return with Asyncify still sleeping. Its pending rewind
+      // resumes MainLoop automatically; calling another WASM export mid-rewind
+      // corrupts the saved stack. Wait using JS only, then cancel that resumed loop.
+      const deadline = performance.now() + 30000;
+      do {
+        await new Promise((r) => setTimeout(r, 10));
+        if (performance.now() > deadline)
+          throw Error(
+            "A inicialização do core não terminou. Recarregue a página.",
+          );
+      } while (!m._netplay_async_idle());
+      m.pauseMainLoop();
+      const idle = () => {
+        if (!m._netplay_async_idle())
+          throw Error(
+            "O core está concluindo uma operação assíncrona. Reabra a sala para sincronizar.",
+          );
+      };
+      m._retro_set_controller_port_device(0, 1);
+      m._retro_set_controller_port_device(1, 257);
+      m._netplay_bind_input();
+      const output = document.createElement("canvas");
+      output.dataset.localSnes = "true";
+      output.style.cssText =
+        "position:fixed;left:50%;top:50%;width:min(100vw,133.333333vh);height:min(100vh,75vw);transform:translate(-50%,-50%);image-rendering:pixelated;background:#030712";
+      output.setAttribute("aria-label", "Tela do jogo");
+      document.getElementById("game").style.visibility = "hidden";
+      document.body.append(output);
+      const drawing = output.getContext("2d", { alpha: false });
+      let pixels;
+      const render = () => {
+        const ptr = m._netplay_video_pointer(),
+          width = m._netplay_video_width(),
+          height = m._netplay_video_height(),
+          pitch = m._netplay_video_pitch();
+        if (!ptr || !width || !height) return;
+        if (
+          width > 1024 ||
+          height > 512 ||
+          pitch < width * 2 ||
+          ptr + pitch * height > m.HEAPU8.length
+        )
+          throw Error("Quadro de vídeo inválido.");
+        if (output.width !== width || output.height !== height) {
+          output.width = width;
+          output.height = height;
+          pixels = drawing.createImageData(width, height);
+        }
+        const source = new Uint16Array(m.HEAPU8.buffer),
+          target = pixels.data;
+        for (let y = 0; y < height; y++)
+          for (let x = 0; x < width; x++) {
+            const color = source[(ptr + y * pitch) / 2 + x],
+              i = (y * width + x) * 4;
+            const r = (color >> 11) & 31,
+              g = (color >> 5) & 63,
+              b = color & 31;
+            target[i] = (r << 3) | (r >> 2);
+            target[i + 1] = (g << 2) | (g >> 4);
+            target[i + 2] = (b << 3) | (b >> 2);
+            target[i + 3] = 255;
+          }
+        drawing.putImageData(pixels, 0, 0);
+      };
+      e.keyChange = () => {};
+      e.gamepadEvent = () => {};
+      e.gamepadSelection = [];
+      let frame = 0;
+      window.__bomberNetplay = {
+        ready: false,
+        version: "ejs-4.2.3-snes9x-netplay-v6",
+        step(masks) {
+          idle();
+          if (
+            !Array.isArray(masks) ||
+            masks.length !== 5 ||
+            masks.some((v) => !Number.isInteger(v) || v < 0 || v > 4095)
+          )
+            throw Error("Entradas inválidas");
+          for (let p = 0; p < 5; p++)
+            for (let b = 0; b < 12; b++)
+              m._simulate_input(p, b, (masks[p] >> b) & 1);
+          const before = m._netplay_native_frame();
+          m._netplay_run_frame();
+          idle();
+          if (m._netplay_native_frame() !== before + 1)
+            throw Error("O core não executou exatamente um quadro nativo.");
+          render();
+          frame++;
+          return frame;
+        },
+        save() {
+          idle();
+          const size = m._netplay_serialize_size();
+          if (!size || size > 2097152)
+            throw Error("Tamanho de snapshot inválido.");
+          const ptr = m._malloc(size);
+          try {
+            if (!m._netplay_serialize(ptr, size))
+              throw Error("O core não conseguiu salvar o estado.");
+            return new Uint8Array(m.HEAPU8.subarray(ptr, ptr + size));
+          } finally {
+            m._free(ptr);
+          }
+        },
+        load(state, number = 0) {
+          idle();
+          const size = m._netplay_serialize_size();
+          let bytes = state;
+          // Existing saves use RetroArch's envelope; retain support without
+          // scheduling its asynchronous file task queue while the loop is stopped.
+          if (
+            state.length !== size &&
+            state.length >= size + 16 &&
+            new TextDecoder().decode(state.subarray(16, 25)) === "#!s9xsnp:"
+          )
+            bytes = state.subarray(16, 16 + size);
+          if (bytes.length !== size)
+            throw Error("Save incompatível com a versão do core.");
+          const ptr = m._malloc(size);
+          try {
+            m.HEAPU8.set(bytes, ptr);
+            if (!m._netplay_unserialize(ptr, size))
+              throw Error("O core recusou o snapshot.");
+          } finally {
+            m._free(ptr);
+          }
+          for (let p = 0; p < 5; p++)
+            for (let b = 0; b < 12; b++) m._simulate_input(p, b, 0);
+          frame = number;
+        },
+        frame: () => frame,
+        async reset() {
+          idle();
+          m._netplay_reset();
+          m._retro_set_controller_port_device(0, 1);
+          m._retro_set_controller_port_device(1, 257);
+          for (let i = 0; i < 2; i++) {
+            window.__bomberNetplay.step([0, 0, 0, 0, 0]);
+            await new Promise((r) => setTimeout(r, 0));
+          }
+          frame = 0;
+        },
+        volume(v) {
+          e.volume = v;
+          e.setVolume(v);
+        },
+        resumeAudio: () => m.AL.currentCtx.audioCtx.resume(),
+      };
+      // Snes9x needs to reach a frame boundary before its first canonical save.
+      // No room inputs run during this deterministic, neutral bootstrap.
+      for (let i = 0; i < 2; i++) {
+        window.__bomberNetplay.step([0, 0, 0, 0, 0]);
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      frame = 0;
+      window.__bomberNetplay.ready = true;
+      parent.dispatchEvent(new CustomEvent("bomber-netplay-ready"));
+    };
+    for (const type of ["keydown", "keyup"])
+      window.addEventListener(
+        type,
+        (event) => {
+          if (event.repeat) return;
+          event.preventDefault();
+          if (event.code === "Escape") {
+            if (type === "keydown")
+              parent.dispatchEvent(
+                new KeyboardEvent("keydown", { key: "Escape", code: "Escape" }),
+              );
+            return;
+          }
+          parent.dispatchEvent(
+            new CustomEvent("bomber-key", {
+              detail: { code: event.code, down: type === "keydown" },
+            }),
+          );
+        },
+        true,
+      );
+    window.addEventListener("blur", () => {
+      // Moving focus from the iframe to a touch button is still inside this
+      // game. Forward only an actual loss of focus of the whole document.
+      if (!parent.document.hasFocus()) parent.dispatchEvent(new Event("blur"));
+    });
+    window.addEventListener("focus", () =>
+      parent.dispatchEvent(new Event("focus")),
+    );
+  </script>
+  <script src="/netplay-emulatorjs/loader.js"></script>
+</html>

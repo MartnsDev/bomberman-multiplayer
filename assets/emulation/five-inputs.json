@@ -1,0 +1,17 @@
+{
+  "id": "ejs-4.2.3-snes9x-five-inputs-v2",
+  "files": {
+    "cores/snes9x-wasm.data": {
+      "upstream": "eaa0bcfce67673809886e50387a80a616b719502175db64c090d04c9d75958ee",
+      "sha256": "1095d826b84fd97928064b9a1a5d90fd0d074a3d2849ebf2f6c2c947e0c207e4",
+      "wasm": "1cf9558ad0081c22cb1c71c6e79faba6379935aebb7e8d14c0c065379e8ef354",
+      "originalWasm": "2bc7b519bc185af151cc7ebc42c0a926a125be174c6467c24bb0495820adf0bf"
+    },
+    "cores/snes9x-legacy-wasm.data": {
+      "upstream": "7d427a575cefad98ff400493fa1d7e892da63fe7bab68979babd9cea0bfaaf3b",
+      "sha256": "d6580fee6e4efcc455181704d8a071cd3eed73e29345754b045679ac9514b78a",
+      "wasm": "e26e19729c102520539e361fa55f72089b6deb47af4e722fb78a4274762aefc9",
+      "originalWasm": "c3b930598155256dae0e4f66f2bb05c5dd6fc2366fbb5048a34dd61db392d1cf"
+    }
+  }
+}

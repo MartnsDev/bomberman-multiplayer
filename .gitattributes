@@ -1,0 +1,13 @@
+* text=auto eol=lf
+*.sfc binary
+*.smc binary
+*.state binary
+*.data binary
+*.png binary
+*.webp binary
+*.woff2 binary
+
+# Preserve byte-for-byte third-party files and their integrity hashes.
+public/emulatorjs/** -whitespace
+public/netplay-emulatorjs/** -whitespace
+public/licenses/** -whitespace

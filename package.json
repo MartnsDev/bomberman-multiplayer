@@ -1,0 +1,54 @@
+{
+  "name": "bomberman-online",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch server.ts",
+    "build": "next build",
+    "start": "NODE_ENV=production tsx server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "setup:emulator": "node scripts/setup-emulator.mjs",
+    "setup:owner": "node scripts/setup-owner.mjs",
+    "prepare:client": "node scripts/prepare-client.mjs",
+    "predev": "npm run prepare:images && node scripts/prepare-client.mjs --dev",
+    "postbuild": "npm run prepare:client",
+    "prepare:images": "node scripts/prepare-images.mjs",
+    "prebuild": "npm run prepare:images && npm run prepare:client",
+    "setup:netplay": "node scripts/setup-netplay.mjs",
+    "setup:fixtures": "node scripts/setup-test-fixtures.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.900.0",
+    "@upstash/redis": "^1.39.0",
+    "@vercel/blob": "^2.8.2",
+    "@vercel/functions": "^3.10.3",
+    "dotenv": "^17.2.0",
+    "idb-keyval": "^6.2.2",
+    "lucide-react": "^1.61.0",
+    "next": "16.4.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "sharp": "0.35.5",
+    "tsx": "^4.20.0",
+    "ws": "^8.18.3",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.0",
+    "@tailwindcss/postcss": "^4.1.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/ws": "^8.18.0",
+    "prettier": "^3.9.10",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.0"
+  },
+  "type": "module",
+  "overrides": {
+    "zod": "$zod"
+  }
+}

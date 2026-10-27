@@ -1,0 +1,27 @@
+node_modules/
+.next/
+.env*
+!.env.example
+.private/
+test-results/
+playwright-report/
+*.sfc
+*.smc
+*.state
+*.tsbuildinfo
+.vercel
+
+.next-test/
+
+.next-verify/
+
+
+# Cópias incluídas explicitamente no backup solicitado pelo proprietário.
+!roms/super-bomberman-5.sfc
+!tests/fixtures/battle5.state
+
+# Configurações locais de ferramentas e credenciais não pertencem ao projeto.
+.agents/
+.codex/
+.aws/
+.claude/

@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="pt-BR">
+  <meta charset="utf-8" /><title>Super Bomberman 5 · Emulador</title
+  ><style>
+    html,
+    body,
+    #game {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: #030712;
+    }
+    .ejs_menu_bar {
+      display: none !important;
+    }
+  </style>
+  <div id="game"></div>
+  <script>
+    // Same-origin isolated lifecycle: removing this iframe disposes WASM, listeners and audio.
+    // A persistent master bus follows OpenAL's frequent disconnect/reconnect
+    // operations. Sources keep their local output; the bus also feeds WebRTC.
+    const audioBuses = new WeakMap();
+    const originalConnect = AudioNode.prototype.connect;
+    function audioTap(context) {
+      let tap = audioBuses.get(context);
+      if (!tap) {
+        const bus = context.createGain();
+        const destination = context.createMediaStreamDestination();
+        originalConnect.call(bus, context.destination);
+        originalConnect.call(bus, destination);
+        tap = { bus, destination };
+        audioBuses.set(context, tap);
+      }
+      return tap;
+    }
+    AudioNode.prototype.connect = function (destination, ...args) {
+      if (destination === this.context.destination)
+        return originalConnect.call(this, audioTap(this.context).bus, ...args);
+      return originalConnect.call(this, destination, ...args);
+    };
+    window.EJS_player = "#game";
+    window.EJS_core = "snes9x";
+    // The owner prepares the private ROM in memory while the room fills up.
+    // Guests never request it; it is excluded from the public asset cache.
+    window.EJS_gameUrl = parent.__bomberPreparedRom
+      ? new Uint8Array(parent.__bomberPreparedRom)
+      : "/api/rom";
+    window.EJS_CacheLimit = 0;
+    window.EJS_gameName = "Super Bomberman 5";
+    window.EJS_pathtodata = "/emulatorjs/";
+    window.EJS_language = "pt-BR";
+    // EmulatorJS 4.2.3 has no EJS_multitap option. Configure libretro port 2
+    // before core startup. setup:emulator installs our five-input frontend fix.
+    window.EJS_startOnLoaded = false;
+    window.EJS_ready = () => {
+      const originalConfig = window.EJS_GameManager.prototype.getRetroArchCfg;
+      window.EJS_GameManager.prototype.getRetroArchCfg = function () {
+        return (
+          originalConfig.call(this) +
+          '\ninput_libretro_device_p1 = "1"\ninput_libretro_device_p2 = "257"\ninput_max_users = "5"\n'
+        );
+      };
+      const start =
+        window.EJS_emulator.elements.parent.querySelector(".ejs_start_button");
+      if (!start) throw Error("Botão de inicialização do core indisponível");
+      start.click();
+    };
+    window.EJS_threads = false;
+    window.EJS_disableDatabases = true;
+    window.EJS_volume = 0.7;
+    window.EJS_backgroundColor = "#030712";
+    window.EJS_defaultOptions = {
+      shader: "disabled",
+      "virtual-gamepad": "disabled",
+    };
+    window.EJS_onGameStart = () => {
+      const e = window.EJS_emulator;
+      const configureControllers = () => {
+        // Apply the standard libretro API as well as the startup config. Core
+        // initialization/restored snapshots can reset the physical SNES ports.
+        e.Module._retro_set_controller_port_device(0, 1);
+        e.Module._retro_set_controller_port_device(1, 257);
+      };
+      configureControllers();
+      // One input pipeline only: parent owns keyboard/gamepad and routes player slots.
+      e.keyChange = () => {};
+      e.gamepadEvent = () => {};
+      e.gamepadSelection = [];
+      let capture;
+      window.__bomber = {
+        resumeAudio: () => e.Module.AL.currentCtx.audioCtx.resume(),
+        input: (p, b, v) => e.gameManager.simulateInput(p, b, v),
+        restart: () => {
+          e.gameManager.restart();
+          configureControllers();
+        },
+        save: () => e.gameManager.getState(),
+        load: (s) => {
+          e.gameManager.loadState(s);
+          configureControllers();
+        },
+        volume: (v) => {
+          e.volume = v;
+          e.setVolume(v);
+        },
+        stream: (fps) => {
+          if (capture) return capture;
+          const al = e.Module?.AL?.currentCtx;
+          if (!al?.audioCtx) throw Error("Aguardando áudio do core");
+          const canvas = e.canvas;
+          if (!canvas) throw Error("Canvas indisponível");
+          const destination = audioTap(al.audioCtx).destination;
+          // Capture the WebGL canvas natively. An extra 2D drawImage loop can
+          // sample a cleared drawing buffer and intermittently send black frames.
+          // Each WebRTC sender scales this track before encoding for its phone.
+          capture = canvas.captureStream(fps);
+          capture.getVideoTracks()[0].contentHint = "motion";
+          for (const track of destination.stream.getAudioTracks())
+            capture.addTrack(track);
+          return capture;
+        },
+        frame: () => e.gameManager.functions.getFrameNum(),
+      };
+      parent.dispatchEvent(new CustomEvent("bomber-ready"));
+    };
+    for (const type of ["keydown", "keyup"])
+      window.addEventListener(
+        type,
+        (event) => {
+          if (event.repeat) return;
+          event.preventDefault();
+          parent.dispatchEvent(
+            new CustomEvent("bomber-key", {
+              detail: { code: event.code, down: type === "keydown" },
+            }),
+          );
+        },
+        true,
+      );
+    window.addEventListener("blur", () =>
+      parent.dispatchEvent(new Event("blur")),
+    );
+    window.addEventListener("focus", () =>
+      parent.dispatchEvent(new Event("focus")),
+    );
+    window.addEventListener("error", () =>
+      parent.dispatchEvent(new CustomEvent("bomber-error")),
+    );
+  </script>
+  <script src="/emulatorjs/loader.js"></script>
+</html>
