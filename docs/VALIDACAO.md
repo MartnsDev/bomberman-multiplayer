@@ -334,3 +334,23 @@ logo após o início do toque quando sua preparação já consumiu vários quadr
 
 Aplicação: sair da sala antiga, atualizar em todos os aparelhos e criar uma sala
 nova. A ROM instalada e os saves são preservados no armazenamento do navegador.
+
+## Acesso público sem senha — 27/10/2026
+
+Criar e iniciar uma sala passou a depender da posição de anfitrião, sem exigir
+login administrativo. Convidados continuam sem poder iniciar a sala de outro
+anfitrião. Salas criadas por visitantes podem ser retomadas pelo token próprio;
+a administração e o endpoint privado de biblioteca continuam autenticados.
+
+O modo solo da página principal agora usa a emulação local numa sala de uma
+pessoa, com início automático quando estiver preparada. O botão **Instalar jogo
+neste aparelho** baixa a cópia que o proprietário já publicou no GitHub, fixada
+por commit e SHA-256. A cópia é armazenada no navegador; o endpoint privado não
+foi aberto ao público. Importação manual continua disponível.
+
+50 testes unitários passaram. Três testes no Redis real passaram, incluindo
+criação, início e retomada por visitante anônimo e rejeição de início por outro
+participante. O teste inicial com três navegadores anônimos passou: instalação
+pública real, zero POSTs de login, início, retorno após recarregar e rotas privadas
+recusando GET (401) e PUT (403). A checagem de cinco controles também passou com
+anfitrião anônimo. A senha administrativa atual permanece privada e inalterada.

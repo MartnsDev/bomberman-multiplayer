@@ -2,6 +2,7 @@ import { test, expect, type Page, type CDPSession } from "@playwright/test";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import sharp from "sharp";
 const romPath = process.env.TEST_ROM_PATH;
+const publicHost = process.env.TEST_PUBLIC_HOST === "1";
 const directions = ["Direita", "Esquerda", "Esquerda", "Direita", "Cima"];
 async function picture(p: Page) {
   return Buffer.from(
@@ -132,7 +133,7 @@ for (const count of [2, 3, 4, 5])
             }
           };
         });
-        if (i === 0) {
+        if (i === 0 && !publicHost) {
           const r = await c.request.post(`${baseURL}/api/auth`, {
             headers: { Origin: baseURL! },
             data: {
@@ -160,7 +161,9 @@ for (const count of [2, 3, 4, 5])
       await h.goto("/netplay-lab");
       await expect(
         h.getByRole("button", {
-          name: "M Proprietário Acesso privado",
+          name: publicHost
+            ? "Área do proprietário Entrar na administração"
+            : "M Proprietário Acesso privado",
           exact: true,
         }),
       ).toBeVisible();

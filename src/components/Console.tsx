@@ -53,6 +53,7 @@ export default function Console({ netplay = false }: { netplay?: boolean }) {
   const [touchSize, setTouchSize] = useState<TouchSize>("normal");
   const [expanded, setExpanded] = useState(false);
   const [netplayCanStart, setNetplayCanStart] = useState(false);
+  const [soloRoom, setSoloRoom] = useState(false);
   const touch = useRef(new Set<number>());
   const updateTouch = useCallback((buttons: number[]) => {
     touch.current.clear();
@@ -63,6 +64,27 @@ export default function Console({ netplay = false }: { netplay?: boolean }) {
   const playing = s.solo || !!s.room?.started;
   const local = owner && (s.solo || (host && !!s.room?.started));
   const preparation = usePreparation(owner, playing, !!s.room, netplay);
+  useEffect(() => {
+    if (
+      netplay &&
+      soloRoom &&
+      host &&
+      s.room &&
+      !s.room.started &&
+      netplayCanStart &&
+      !preparation.update
+    )
+      s.send({ type: "start" });
+  }, [
+    netplay,
+    soloRoom,
+    host,
+    s.room?.code,
+    s.room?.started,
+    netplayCanStart,
+    preparation.update,
+    s.send,
+  ]);
   useEffect(() => {
     void fetch("/api/auth")
       .then((r) => r.json())
@@ -245,7 +267,8 @@ export default function Console({ netplay = false }: { netplay?: boolean }) {
     }
   };
   const openCreate = () => {
-    if (owner) setPanel("create");
+    setSoloRoom(false);
+    if (netplay || owner) setPanel("create");
     else {
       setPanel("admin");
       setNotice("Entre como proprietário para criar uma sala.");
@@ -406,9 +429,15 @@ export default function Console({ netplay = false }: { netplay?: boolean }) {
           <Home
             netplay={netplay}
             onCreate={openCreate}
-            onJoin={() => setPanel("join")}
+            onJoin={() => {
+              setSoloRoom(false);
+              setPanel("join");
+            }}
             onSolo={() => {
-              if (owner && preparation.ready && !preparation.update)
+              if (netplay) {
+                setSoloRoom(true);
+                setPanel("create");
+              } else if (owner && preparation.ready && !preparation.update)
                 s.setSolo(true);
               else if (owner)
                 setNotice(
@@ -455,6 +484,7 @@ export default function Console({ netplay = false }: { netplay?: boolean }) {
                 className="danger"
                 onClick={() => {
                   s.leave();
+                  setSoloRoom(false);
                   setNotice("Você saiu da sala.");
                 }}
               >
@@ -757,7 +787,8 @@ export default function Console({ netplay = false }: { netplay?: boolean }) {
             <a href="/licenses/Snes9x.txt" target="_blank">
               Snes9x
             </a>{" "}
-            <span className="footer-dot">•</span> Biblioteca privada
+            <span className="footer-dot">•</span>{" "}
+            {netplay ? "Sem senha para jogar" : "Biblioteca privada"}
           </span>
         </footer>
         {panel && (
@@ -775,7 +806,9 @@ export default function Console({ netplay = false }: { netplay?: boolean }) {
                       ? "Administração"
                       : panel === "join"
                         ? "Entrar em sala"
-                        : "Criar sala"
+                        : soloRoom
+                          ? "Jogar sozinho"
+                          : "Criar sala"
               }
             >
               <button
@@ -909,6 +942,7 @@ export default function Console({ netplay = false }: { netplay?: boolean }) {
                   onSubmit={(e) => {
                     e.preventDefault();
                     s.setError("");
+                    if (panel === "join") setSoloRoom(false);
                     s.send(
                       panel === "join"
                         ? { type: "join", name, code, avatar }
@@ -919,8 +953,15 @@ export default function Console({ netplay = false }: { netplay?: boolean }) {
                 >
                   <p className="eyebrow">A DIVERSÃO COMEÇA AQUI</p>
                   <h2>
-                    {panel === "join" ? "Entrar em sala" : "Criar sala privada"}
+                    {panel === "join"
+                      ? "Entrar em sala"
+                      : soloRoom
+                        ? "Jogar sozinho"
+                        : "Criar sala privada"}
                   </h2>
+                  <p className="subtle">
+                    Escolha um apelido e jogue. Não é preciso senha ou cadastro.
+                  </p>
                   <ProfilePicker
                     name={name}
                     avatar={avatar}
@@ -977,7 +1018,9 @@ export default function Console({ netplay = false }: { netplay?: boolean }) {
                   >
                     {panel === "join"
                       ? "Entrar na sala"
-                      : "Criar e receber código"}
+                      : soloRoom
+                        ? "Começar a jogar"
+                        : "Criar e receber código"}
                   </button>
                   {!netplay && !preparation.ready && (
                     <p className="subtle" role="status">

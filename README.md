@@ -69,9 +69,9 @@ A cópia fornecida pelo proprietário está em **[roms/super-bomberman-5.sfc](ro
 
 **[Baixar o arquivo .sfc](https://github.com/MartnsDev/bomberman-multiplayer/raw/refs/heads/main/roms/super-bomberman-5.sfc)**
 
-1. Baixe o arquivo `.sfc` no computador ou celular. Na página do arquivo no GitHub, o botão **Download raw file** também permite salvá-lo.
+1. Para guardar uma cópia manual, baixe o arquivo `.sfc` no computador ou celular. Na página do arquivo no GitHub, o botão **Download raw file** também permite salvá-lo.
 2. Abra o [site publicado](https://bomberman-online.vercel.app).
-3. Abra **Instalar o jogo neste aparelho** e selecione o `.sfc`.
+3. Abra **Instalar o jogo neste aparelho** e use **Instalar jogo neste aparelho**. Como alternativa, selecione o `.sfc` que baixou.
 4. Aguarde a confirmação de instalação e a preparação do emulador.
 5. Nas próximas visitas, use o mesmo navegador: a cópia instalada é reutilizada.
 
@@ -83,15 +83,17 @@ Para guardar o projeto inteiro, use **Code → Download ZIP** no GitHub ou clone
 
 ### 1. Preparar os aparelhos
 
-Cada pessoa abre o site e instala a ROM no próprio navegador. Aguarde **Emulador preparado** e a confirmação do jogo instalado. Em uma atualização de versão, todos devem sair da sala antiga, atualizar a página e criar uma sala nova.
+Cada pessoa abre o site, seleciona **Instalar jogo neste aparelho** e aguarda o download. Também é possível importar manualmente o arquivo `.sfc`. Não é preciso fazer login. Aguarde **Emulador preparado** e a confirmação do jogo instalado. Em uma atualização de versão, todos devem sair da sala antiga, atualizar a página e criar uma sala nova.
 
 ### 2. Criar e compartilhar a sala
 
-1. O proprietário entra em **Área do proprietário** com a senha administrativa.
-2. Seleciona **Criar sala**, escolhe um perfil ou apelido e confirma.
-3. Compartilha o convite ou código da sala com os amigos.
-4. Os convidados usam **Entrar em sala**, escolhem o próprio perfil e informam o código. Eles não precisam de senha administrativa.
-5. Depois que ROM, emulador e estado inicial estiverem prontos em todos os aparelhos, o proprietário seleciona **Iniciar partida**.
+1. Qualquer pessoa seleciona **Criar sala**, escolhe um perfil ou apelido e confirma. **Não é preciso senha ou cadastro.**
+2. Quem criou compartilha o convite ou código da sala com os amigos.
+3. Os convidados usam **Entrar em sala**, escolhem o próprio perfil e informam o código. Abrir o convite já preenche o código.
+4. Depois que jogo, emulador e estado inicial estiverem prontos em todos os aparelhos, quem criou a sala seleciona **Iniciar partida**.
+5. Para jogar sem companhia, use **Jogar sozinho**, escolha um apelido e instale o jogo se necessário. A sessão começa automaticamente quando estiver pronta.
+
+A **Área do proprietário** é apenas para administração e continua protegida. A senha administrativa não é usada para jogar, criar salas ou convidar amigos.
 
 ### 3. Configurar os jogadores no jogo original
 
@@ -206,7 +208,7 @@ Em produção, configure `APP_ORIGIN` com a origem HTTPS exata. Para servir o jo
 
 ## Administração e senha
 
-A senha de uma instalação nova é escolhida por quem executa `setup:owner`. A senha do site publicado e as credenciais de infraestrutura são administradas separadamente. O código da sala não concede acesso administrativo.
+**Jogar, criar sala e iniciar partidas não exigem senha.** A senha de uma instalação nova é escolhida por quem executa `setup:owner` e protege somente a administração. A senha do site publicado e as credenciais de infraestrutura são administradas separadamente. O código da sala não concede acesso administrativo.
 
 | Arquivo / variável              | Finalidade                                               |
 | ------------------------------- | -------------------------------------------------------- |
@@ -259,7 +261,7 @@ npm run typecheck
 npm test
 ```
 
-A revisão publicada passou 49 testes unitários. Os testes Redis são opt-in e precisam de credenciais de um banco de teste. Não configure as credenciais de produção em um arquivo versionado.
+A revisão de acesso público passou 50 testes unitários. Os três testes Redis são opt-in e precisam de credenciais de um banco de teste. Não configure as credenciais de produção em um arquivo versionado.
 
 ### Emulação real e navegadores
 
@@ -279,7 +281,7 @@ PLAYWRIGHT_BASE_URL=http://localhost:3000 \
 npx playwright test tests/e2e/netplay.spec.ts tests/e2e/netplay-gameplay.spec.ts tests/e2e/netplay-departures.spec.ts
 ```
 
-O setup salva a senha local no arquivo usado pela automação. Esses testes executam o core real, conferem controles exclusivos, movimento, bombas, áudio, checksums, saída/reentrada, perda de foco e suspensão simulada do loop do coordenador. Os testes legados de Remote Play têm requisitos próprios e estão preservados como histórico.
+O setup salva a senha local no arquivo usado pela automação. O teste `tests/e2e/public-play.spec.ts` verifica visitantes sem login, instalação direta, sala com três pessoas, retorno e modo solo, mantendo as rotas administrativas protegidas. Os demais testes executam o core real, conferem controles exclusivos, movimento, bombas, áudio, checksums, saída/reentrada, perda de foco e suspensão simulada do loop do coordenador. Os testes legados de Remote Play têm requisitos próprios e estão preservados como histórico.
 
 Para ampliar o cenário de três jogadores com testes móveis e rede artificialmente atrasada, adicione `TEST_MOBILE_CONTROLS=1 TEST_MOBILE_NETWORK=1 TEST_NETPLAY_RESILIENCE=1` ao comando. Atraso e retransmissão são simulados na aplicação; os testes não medem perda real de UDP. A validação em celulares físicos e redes distintas deve complementar a automação.
 

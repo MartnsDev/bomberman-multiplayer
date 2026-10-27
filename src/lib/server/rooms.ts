@@ -77,7 +77,6 @@ export class RoomService {
       if (c.code) throw Error("Saia da sala atual primeiro.");
       let r: InternalRoom;
       if (msg.type === "create") {
-        if (!c.owner) throw Error("Somente o proprietário pode criar salas.");
         if (this.rooms.size >= 100) throw Error("Limite de salas atingido.");
         let code: string;
         do {
@@ -111,7 +110,7 @@ export class RoomService {
         connected: true,
         token: randomBytes(32).toString("hex"),
         client: c,
-        ownerOnly: msg.type === "create",
+        ownerOnly: msg.type === "create" && c.owner,
         gameReady: false,
       };
       r.members.push(m);
@@ -201,8 +200,7 @@ export class RoomService {
       return;
     }
     if (msg.type === "start") {
-      if (c.id !== r.hostId || !c.owner)
-        throw Error("Somente o anfitrião pode iniciar.");
+      if (c.id !== r.hostId) throw Error("Somente o anfitrião pode iniciar.");
       r.started = true;
       this.broadcast(r);
       return;

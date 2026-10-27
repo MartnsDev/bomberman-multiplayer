@@ -88,13 +88,10 @@ describe("salas autoritativas", () => {
     svc.leave(h.c, true);
     svc.leave(t.c, true);
   });
-  it("exige proprietário, atribui vagas, recusa códigos e encerra com host", () => {
+  it("atribui vagas, recusa códigos e permite encerramento administrativo", () => {
     const service = new RoomService(2),
       host = client(true),
       guest = client();
-    expect(() =>
-      service.handle(guest.c, { type: "create", name: "X" }),
-    ).toThrow();
     service.handle(host.c, { type: "create", name: "Host" });
     const code = host.room().code;
     expect(code).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
@@ -112,6 +109,33 @@ describe("salas autoritativas", () => {
     service.leave(host.c, true);
     expect(guest.events.at(-1)?.type).toBe("closed");
     expect(service.hasToken("bad")).toBe(false);
+  });
+  it("permite criar, iniciar e retomar sem login, sem dar administração a convidados", () => {
+    const svc = new RoomService(3),
+      h = client(),
+      g = client();
+    svc.handle(h.c, { type: "create", name: "Visitante" });
+    const initial = h.events.find(
+      (e) => e.type === "room" && e.token,
+    ) as Extract<ServerEvent, { type: "room" }>;
+    const code = initial.room.code,
+      id = h.c.id;
+    svc.handle(g.c, { type: "join", code, name: "Amigo" });
+    for (const p of [h, g]) svc.handle(p.c, { type: "game-ready" });
+    expect(() => svc.handle(g.c, { type: "start" })).toThrow("anfitrião");
+    svc.handle(h.c, { type: "start" });
+    expect(g.room().started).toBe(true);
+    svc.leave(h.c);
+    const resumed = client();
+    expect(() =>
+      svc.handle(resumed.c, { type: "resume", code, token: "invalid" }),
+    ).toThrow();
+    svc.handle(resumed.c, { type: "resume", code, token: initial.token! });
+    expect(resumed.c.id).toBe(id);
+    expect(resumed.c.owner).toBe(false);
+    expect(g.c.owner).toBe(false);
+    expect(resumed.room().players.find((p) => p.id === id)?.slot).toBe(0);
+    expect(g.room().hostId).toBe(g.c.id);
   });
   it("libera vaga e reconecta apenas com token próprio", () => {
     const service = new RoomService(2),

@@ -158,7 +158,6 @@ export class DistributedRooms {
     }
     if (msg.type === "create") {
       if (c.code) throw Error("Saia da sala atual primeiro.");
-      if (!c.owner) throw Error("Somente o proprietário pode criar salas.");
       const member: Member = {
         id: randomUUID(),
         name: msg.name,
@@ -168,7 +167,7 @@ export class DistributedRooms {
         token: randomBytes(32).toString("hex"),
         connection: c.connection,
         lastSeen: Date.now(),
-        ownerOnly: true,
+        ownerOnly: c.owner,
         gameReady: false,
       };
       for (let n = 0; n < 10; n++) {
@@ -314,8 +313,7 @@ export class DistributedRooms {
         return;
       }
       if (msg.type === "start") {
-        if (m.id !== r.hostId || !c.owner)
-          throw Error("Somente o anfitrião pode iniciar.");
+        if (m.id !== r.hostId) throw Error("Somente o anfitrião pode iniciar.");
         r.started = true;
         events.push({ event: { type: "room", room: this.view(r) } });
         return;

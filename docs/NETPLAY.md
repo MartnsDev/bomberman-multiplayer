@@ -2,8 +2,7 @@
 
 ## Uso
 
-Atualize o site em todos os aparelhos e crie uma sala nova. Cada participante
-importa sua própria ROM de Super Bomberman 5. A cópia é verificada por SHA-256 e
+Atualize o site em todos os aparelhos e crie uma sala nova. Qualquer visitante pode criar e iniciar sua sala, sem senha ou cadastro. Cada participante usa **Instalar jogo neste aparelho** para baixar a cópia pública do repositório, ou importa sua própria ROM de Super Bomberman 5. A cópia é verificada por SHA-256 e
 armazenada no IndexedDB; nas próximas partidas ela é lida localmente. O
 proprietário também pode instalar sua cópia da biblioteca privada por download
 autenticado. Convidados não recebem acesso ao endpoint privado da ROM.
@@ -22,8 +21,7 @@ configurações. Imagem, áudio, volume e modo expandido são locais.
 ## Execução
 
 A página principal usa `NetplayRoom`. O protótipo também permanece acessível em
-`/netplay-lab`. O adaptador anterior foi preservado para o modo solo e como
-referência da migração; salas da interface principal não criam MediaStreams,
+`/netplay-lab`. O modo solo público usa uma sala de uma pessoa e a mesma emulação local. O adaptador anterior permanece como referência da migração; salas da interface principal não criam MediaStreams,
 vídeos remotos nem senders RTP.
 
 Base: EmulatorJS 4.2.3 / Snes9x 2.0.2, variante legacy sem threads. Os arquivos

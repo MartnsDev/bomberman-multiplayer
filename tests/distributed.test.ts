@@ -247,3 +247,90 @@ test.skipIf(!enabled)(
   },
   45000,
 );
+
+test.skipIf(!enabled)(
+  "Redis real: criar, iniciar e retomar sala sem senha administrativa",
+  async () => {
+    const db = new Redis({
+      url: process.env.KV_REST_API_URL!,
+      token: process.env.KV_REST_API_TOKEN!,
+      automaticDeserialization: false,
+    });
+    const prefix = `bmr:test:${randomUUID()}`,
+      a = new DistributedRooms(db, prefix),
+      b = new DistributedRooms(db, prefix);
+    const make = () => {
+      const events: ServerEvent[] = [];
+      const c: DistributedClient = {
+        owner: false,
+        connection: randomUUID(),
+        cursor: "0-0",
+        send: (e) => events.push(e),
+      };
+      return { c, events };
+    };
+    const h = make(),
+      g = make(),
+      resumed = make();
+    let code = "";
+    const tokens: string[] = [];
+    try {
+      await a.handle(h.c, { type: "create", name: "Visitante" });
+      const initial = h.events.find(
+        (e) => e.type === "room" && e.token,
+      ) as Extract<ServerEvent, { type: "room" }>;
+      code = initial.room.code;
+      tokens.push(initial.token!);
+      await b.handle(g.c, { type: "join", code, name: "Amigo" });
+      tokens.push(
+        (
+          g.events.find((e) => e.type === "room" && e.token) as Extract<
+            ServerEvent,
+            { type: "room" }
+          >
+        ).token!,
+      );
+      for (const p of [h, g]) await a.handle(p.c, { type: "game-ready" });
+      await expect(b.handle(g.c, { type: "start" })).rejects.toThrow(
+        "anfitrião",
+      );
+      await a.handle(h.c, { type: "start" });
+      await b.poll(g.c);
+      expect(
+        (
+          g.events.filter((e) => e.type === "room").at(-1) as Extract<
+            ServerEvent,
+            { type: "room" }
+          >
+        ).room.started,
+      ).toBe(true);
+      await a.disconnect(h.c);
+      await b.handle(resumed.c, {
+        type: "resume",
+        code,
+        token: initial.token!,
+      });
+      expect(resumed.c.id).toBe(h.c.id);
+      expect(resumed.c.owner).toBe(false);
+      const stored = JSON.parse((await db.get<string>(`${prefix}:${code}`))!);
+      expect(stored.hostId).toBe(g.c.id);
+      expect(stored.players.find((p: any) => p.id === resumed.c.id).slot).toBe(
+        0,
+      );
+      expect(
+        stored.players.find((p: any) => p.id === resumed.c.id).ownerOnly,
+      ).toBe(false);
+    } finally {
+      if (code)
+        await db.del(
+          `${prefix}:${code}`,
+          `${prefix}:${code}:events`,
+          ...tokens.map(
+            (t) =>
+              `${prefix}:token:${createHash("sha256").update(t).digest("hex")}`,
+          ),
+        );
+    }
+  },
+  45000,
+);

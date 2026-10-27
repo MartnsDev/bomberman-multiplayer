@@ -82,6 +82,15 @@ test("redesign de referência: capturas desktop e responsivas com navegação re
     await page
       .getByRole("button", { name: "＋ Criar sala", exact: true })
       .click();
+    await expect(page.getByLabel("Seu apelido", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Senha administrativa")).toHaveCount(0);
+    await page.getByRole("button", { name: "Fechar janela" }).click();
+    await page
+      .getByRole("button", {
+        name: "Área do proprietário Entrar na administração",
+        exact: true,
+      })
+      .click();
     await expect(page.getByLabel("Senha administrativa")).toBeVisible();
     await page.getByRole("button", { name: "Fechar janela" }).click();
     expect(errors).toEqual([]);

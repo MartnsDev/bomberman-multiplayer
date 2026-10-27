@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { PUBLIC_ROM_URL, PUBLIC_ROM_SHA256 } from "@/lib/netplay/public-rom";
 import {
   installLocalRom,
   readLocalRom,
@@ -43,11 +44,11 @@ export default function LocalRomInstall({
       stopped = true;
     };
   }, [expectedHash, installed]);
-  async function install(blob: Blob) {
+  async function install(blob: Blob, requiredHash = expectedHash) {
     setBusy(true);
     setError("");
     try {
-      const rom = await installLocalRom(blob, expectedHash);
+      const rom = await installLocalRom(blob, requiredHash);
       installed(rom);
       setReady(true);
       setState(
@@ -81,6 +82,37 @@ export default function LocalRomInstall({
       )}
       {!ready && (
         <>
+          {(!expectedHash || expectedHash === PUBLIC_ROM_SHA256) && (
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                setError("");
+                void fetch(PUBLIC_ROM_URL, {
+                  cache: "force-cache",
+                  credentials: "omit",
+                })
+                  .then(async (r) => {
+                    if (!r.ok)
+                      throw Error(
+                        "Não foi possível baixar o jogo. Tente novamente ou importe o arquivo local.",
+                      );
+                    await install(await r.blob(), PUBLIC_ROM_SHA256);
+                  })
+                  .catch((e: unknown) => {
+                    setBusy(false);
+                    setError(
+                      e instanceof Error
+                        ? e.message
+                        : "Falha ao baixar o jogo.",
+                    );
+                  });
+              }}
+            >
+              Instalar jogo neste aparelho
+            </button>
+          )}
           <label className="rom-import">
             Importar minha ROM (.sfc ou .smc)
             <input
@@ -123,8 +155,9 @@ export default function LocalRomInstall({
             </button>
           )}
           <small>
-            Use uma ROM obtida legalmente por você. Cada jogador precisa ter a
-            mesma versão. O arquivo fica no armazenamento local do navegador.
+            A instalação usa a cópia disponibilizada pelo proprietário no
+            GitHub. Você também pode importar sua própria cópia da mesma versão.
+            O jogo fica salvo neste navegador para as próximas partidas.
           </small>
         </>
       )}
