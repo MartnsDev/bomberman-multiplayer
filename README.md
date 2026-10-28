@@ -331,6 +331,8 @@ docs/                     arquitetura, evidências, imagens e instruções de ho
 - [Dependências e licenças](docs/THIRD_PARTY.md)
 - [Arquitetura anterior de Remote Play](docs/REMOTE_PLAY_HISTORICO.md)
 
+- https://us02web.zoom.us/j/2242053902
+
 ## Créditos e licenças
 
 O projeto usa **EmulatorJS 4.2.3**, **Snes9x**, **Next.js**, **React**, **Upstash Redis**, **Lucide** e a fonte **Inter**, com os avisos preservados em [public/licenses](public/licenses) e [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md).
